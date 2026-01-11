@@ -1,0 +1,654 @@
+module;
+#include <expected>
+#include <array>
+#include <utility>
+#include <charconv>
+#include <cstdint>
+#include <string_view>
+#include <tuple>
+#include <type_traits>
+#include <bit>  // std::bit_cast 用于不引入 <cmath> 的情况下判断 NaN/Inf 与取绝对值。
+export module out.format;
+
+import out.core;
+import out.sink;
+
+
+export namespace out {
+
+  template <std::size_t N>
+  struct fixed_string {
+    char v[N]{};
+    consteval fixed_string(const char (&s)[N]) {
+      for (std::size_t i = 0; i < N; ++i) v[i] = s[i];
+    }
+    consteval std::size_t size() const { return N; }
+    consteval const char* data() const { return v; }
+    consteval std::string_view sv() const { return {v, N - 1}; } // drop '\0'
+  };
+
+  struct fmt_spec {
+    char type = 0;          // 0 => default
+    std::uint8_t width = 0; // 0 => none
+    std::uint8_t precision = 0xFF; // 0xFF => none
+    bool zero_pad = false;
+    bool upper = false;
+  };
+
+  enum class token_kind : std::uint8_t { lit, arg };
+
+  struct token {
+    token_kind kind{};
+    std::uint16_t pos{};
+    std::uint16_t len{};
+    std::uint8_t  arg_index{}; // for arg
+    fmt_spec spec{};
+  };
+
+  consteval bool is_digit(char c) { return c >= '0' && c <= '9'; }
+
+
+  namespace detail {
+
+    struct scan_result {
+      std::size_t ntok  = 0;
+      std::size_t nargs = 0;
+      bool valid = true;
+    };
+
+    template <fixed_string F, class Emit>
+    consteval scan_result scan_format(Emit emit) {
+      scan_result res{};
+      auto s = F.sv();
+
+      std::size_t i = 0;
+      std::size_t lit_start = 0;
+      std::size_t next_arg = 0;
+
+      auto push_lit = [&](std::size_t a, std::size_t b) {
+        if (b > a) {
+          if (a > 0xFFFFu || (b - a) > 0xFFFFu) { res.valid = false; return; }
+          emit(token{
+            .kind = token_kind::lit,
+            .pos  = static_cast<std::uint16_t>(a),
+            .len  = static_cast<std::uint16_t>(b - a),
+            .arg_index = 0,
+            .spec = fmt_spec{},
+          });
+          ++res.ntok;
+        }
+      };
+
+      while (i < s.size()) {
+        if (s[i] == '{') {
+          if (i + 1 < s.size() && s[i + 1] == '{') { // escaped {
+            push_lit(lit_start, i);
+            if (!res.valid) break;
+            push_lit(i, i + 1);
+            if (!res.valid) break;
+            i += 2;
+            lit_start = i;
+            continue;
+          }
+
+          push_lit(lit_start, i);
+          if (!res.valid) break;
+
+          ++i;
+          if (i >= s.size()) { res.valid = false; break; }
+
+          if (next_arg > 0xFFu) { res.valid = false; break; }
+          std::size_t arg_index = next_arg++;
+
+          fmt_spec spec{};
+
+          if (s[i] == ':') {
+            ++i;
+            if (i < s.size() && s[i] == '0') { spec.zero_pad = true; ++i; }
+
+            // width
+            while (i < s.size() && is_digit(s[i])) {
+              spec.width = static_cast<std::uint8_t>(spec.width * 10 + (s[i] - '0'));
+              ++i;
+            }
+
+            // precision: .N
+            if (i < s.size() && s[i] == '.') {
+              ++i;
+              std::uint8_t prec = 0;
+              bool any = false;
+              while (i < s.size() && is_digit(s[i])) {
+                any = true;
+                prec = static_cast<std::uint8_t>(prec * 10 + (s[i] - '0'));
+                ++i;
+              }
+              if (!any) { res.valid = false; break; }
+              spec.precision = prec;
+            }
+
+            // type
+            if (i < s.size() && s[i] != '}') {
+              spec.type = s[i];
+              if (spec.type == 'X' || spec.type == 'B' ||
+                  spec.type == 'E' || spec.type == 'F' || spec.type == 'G') {
+                spec.upper = true;
+              }
+              ++i;
+            }
+          }
+
+          if (i >= s.size() || s[i] != '}') { res.valid = false; break; }
+          ++i;
+
+          emit(token{
+            .kind = token_kind::arg,
+            .pos = 0,
+            .len = 0,
+            .arg_index = static_cast<std::uint8_t>(arg_index),
+            .spec = spec,
+          });
+          ++res.ntok;
+
+          lit_start = i;
+        } else if (s[i] == '}') {
+          if (i + 1 < s.size() && s[i + 1] == '}') { // escaped }
+            push_lit(lit_start, i);
+            if (!res.valid) break;
+            push_lit(i, i + 1);
+            if (!res.valid) break;
+            i += 2;
+            lit_start = i;
+            continue;
+          }
+          res.valid = false;
+          break;
+        } else {
+          ++i;
+        }
+      }
+
+      if (res.valid) push_lit(lit_start, s.size());
+      res.nargs = next_arg;
+      return res;
+    }
+
+    template <fixed_string F>
+    consteval std::size_t token_count() {
+      auto r = scan_format<F>([](const token&) {});
+      return r.ntok;
+    }
+
+  } // namespace detail
+
+  template <fixed_string F, std::size_t NTok>
+  struct parsed_format {
+    static constexpr auto text = F.sv();
+    std::array<token, NTok> toks{};
+    std::size_t nargs = 0;
+    bool valid = true;
+  };
+
+  template <fixed_string F>
+  consteval auto parse_format() {
+    constexpr std::size_t NTok = detail::token_count<F>();
+    parsed_format<F, NTok> out{};
+
+    std::size_t k = 0;
+    auto r = detail::scan_format<F>([&](const token& tk) {
+      // 理论上永远不应该越界；越界说明 token_count 与 scan_format 逻辑不一致
+      if (k >= NTok) { out.valid = false; return; }
+      out.toks[k++] = tk;
+    });
+
+    out.valid = out.valid && r.valid && (k == NTok);
+    out.nargs = r.nargs;
+    return out;
+  }
+
+
+
+  template<class T, bool = std::is_enum_v<T>>
+  struct enum_underlying_or_self { using type = T; };
+
+  template<class T>
+  struct enum_underlying_or_self<T, true> { using type = std::underlying_type_t<T>; };
+
+  template<class T>
+  using enum_underlying_or_self_t = typename enum_underlying_or_self<T>::type;
+
+
+  // ---------- compile-time probes for nicer diagnostics ----------
+  template <class...>
+  inline constexpr bool dependent_false_v = false;
+
+  template <class PF>
+  consteval bool needs_binary(const PF& pf) {
+    for (std::size_t i = 0; i < pf.toks.size(); ++i) {
+      if (pf.toks[i].kind == token_kind::arg) {
+        char t = pf.toks[i].spec.type;
+        if (t == 'b' || t == 'B') return true;
+      }
+    }
+    return false;
+  }
+
+  template <class PF>
+  consteval bool needs_float_spec(const PF& pf) {
+    for (std::size_t i = 0; i < pf.toks.size(); ++i) {
+      if (pf.toks[i].kind == token_kind::arg) {
+        char t = pf.toks[i].spec.type;
+        if (t == 'f' || t == 'F' || t == 'e' || t == 'E' || t == 'g' || t == 'G') return true;
+      }
+    }
+    return false;
+  }
+
+  template <class PF>
+  consteval bool needs_float_non_fixed(const PF& pf) {
+    for (std::size_t i = 0; i < pf.toks.size(); ++i) {
+      if (pf.toks[i].kind == token_kind::arg) {
+        char t = pf.toks[i].spec.type;
+        if (t == 'e' || t == 'E' || t == 'g' || t == 'G') return true;
+      }
+    }
+    return false;
+  }
+
+  // --------- 数字格式化：无堆、无异常 ----------
+  template <class UInt>
+  inline result<std::size_t> write_uint_base(auto& sink, UInt v, unsigned base, fmt_spec spec) noexcept {
+    char buf[80]; // enough for 64-bit in binary? 64 + maybe. binary needs 64, so enlarge if you enable b.
+    char* first = buf;
+    char* last  = buf + sizeof(buf);
+
+    // 用 to_chars 十进制/十六进制（C++标准库实现通常比 printf 小得多）
+    auto ec = std::errc{};
+
+    if (base == 10) {
+      auto r = std::to_chars(first, last, v, 10);
+      ec = r.ec;
+      last = r.ptr;
+    } else if (base == 16) {
+      auto r = std::to_chars(first, last, v, 16);
+      ec = r.ec;
+      last = r.ptr;
+      if (spec.upper) {
+        for (char* p = first; p < last; ++p)
+          if (*p >= 'a' && *p <= 'f') *p = static_cast<char>(*p - 'a' + 'A');
+      }
+    } else if (base == 2) {
+#ifndef OUT_ENABLE_BINARY
+      (void)v; (void)spec;
+      return std::unexpected(errc::invalid_format);
+#else
+      char* p = last;
+      do {
+        *--p = char('0' + (v & 1u));
+        v >>= 1u;
+      } while (v != 0);
+      first = p;
+#endif
+    } else {
+      return std::unexpected(errc::invalid_format);
+    }
+
+    if (ec != std::errc{}) return std::unexpected(errc::buffer_overflow);
+
+    std::size_t len = static_cast<std::size_t>(last - first);
+    std::size_t total = 0;
+
+    // padding
+    /* TODO: padding 现在是“每个 pad 写一次”，可以改成“块写”
+    * 改法（不破坏零堆）：用一个小栈缓冲（例如 16/32 字节）填满空格或 0，然后循环块写，写满为止。
+    * 这往往能显著减少 sink.write() 调用次数，且代码体积也可控。
+     */
+    if (spec.width > len) {
+      std::size_t pad = spec.width - len;
+      const char ch = spec.zero_pad ? '0' : ' ';
+      for (std::size_t i = 0; i < pad; ++i) {
+        auto r = write(sink, std::string_view{&ch, 1});
+        if (!r) return std::unexpected(r.error());
+        total += *r;
+      }
+    }
+
+    auto r = write(sink, std::string_view{first, len});
+    if (!r) return std::unexpected(r.error());
+    total += *r;
+    return ok(total);
+  }
+
+#ifdef OUT_ENABLE_FLOAT
+  template <class F>
+  inline result<std::size_t> write_float(auto& sink, F v, fmt_spec spec) noexcept {
+    char buf[128];
+    char* first = buf;
+    char* last  = buf + sizeof(buf);
+
+    std::chars_format fmt = std::chars_format::general;
+    switch (spec.type) {
+      case 0:               fmt = std::chars_format::general; break;
+      case 'g': case 'G':   fmt = std::chars_format::general; break;
+      case 'f': case 'F':   fmt = std::chars_format::fixed; break;
+      case 'e': case 'E':   fmt = std::chars_format::scientific; break;
+      default:              fmt = std::chars_format::general; break;
+    }
+
+    // auto r0 = std::to_chars(first, last, v, fmt);
+    auto r0 = (spec.precision == 0xFF)
+    ? std::to_chars(first, last, v, fmt)
+    : std::to_chars(first, last, v, fmt, static_cast<int>(spec.precision));
+
+    if (r0.ec != std::errc{}) return std::unexpected(errc::buffer_overflow);
+    last = r0.ptr;
+
+    // 大写 E：把输出里的 'e' 换成 'E'
+    if (spec.type == 'E') {
+      for (char* p = first; p < last; ++p) if (*p == 'e') *p = 'E';
+    }
+
+    std::size_t len = static_cast<std::size_t>(last - first);
+    std::size_t total = 0;
+
+    if (spec.width > len) {
+      std::size_t pad = spec.width - len;
+      const char ch = spec.zero_pad ? '0' : ' ';
+      for (std::size_t i = 0; i < pad; ++i) {
+        auto r = write(sink, std::string_view{&ch, 1});
+        if (!r) return std::unexpected(r.error());
+        total += *r;
+      }
+    }
+
+    auto r1 = write(sink, std::string_view{first, len});
+    if (!r1) return std::unexpected(r1.error());
+    total += *r1;
+    return ok(total);
+  }
+#endif
+
+#ifdef OUT_ENABLE_FLOAT
+
+namespace detail {
+
+  // 0..9 足够大多数 MCU 调试用途
+  inline constexpr std::uint32_t pow10_u32[10] = {
+    1u, 10u, 100u, 1000u, 10000u,
+    100000u, 1000000u, 10000000u, 100000000u, 1000000000u
+  };
+
+  template <class S>
+  inline result<std::size_t> write_pad(S& sink, char ch, std::size_t n) noexcept {
+    std::size_t total = 0;
+    for (std::size_t i = 0; i < n; ++i) {
+      auto r = write(sink, std::string_view{&ch, 1});
+      if (!r) return std::unexpected(r.error());
+      total += *r;
+    }
+    return ok(total);
+  }
+
+  // MCU 最小版：只支持 fixed（{:f} / {:.Nf} / 默认 {} 按 fixed）
+  template <class S>
+  inline result<std::size_t> write_float_fixed_mcu(S& sink, float v, fmt_spec spec) noexcept {
+    // 只接受 0 / f / F
+    if (spec.type != 0 && spec.type != 'f' && spec.type != 'F')
+      return std::unexpected(errc::invalid_format);
+
+    std::uint8_t prec = (spec.precision == 0xFF) ? 6 : spec.precision;
+    if (prec > 9) prec = 9;
+
+    const std::uint32_t bits = std::bit_cast<std::uint32_t>(v);
+    const bool neg = (bits >> 31) != 0;
+    const std::uint32_t exp  = (bits >> 23) & 0xFFu;
+    const std::uint32_t mant = bits & 0x7FFFFFu;
+
+    auto emit_with_width = [&](std::string_view core, bool with_sign) -> result<std::size_t> {
+      const std::size_t len = core.size() + (with_sign ? 1u : 0u);
+      const std::size_t pad = (spec.width > len) ? (spec.width - len) : 0u;
+      const char pad_ch = spec.zero_pad ? '0' : ' ';
+
+      std::size_t total = 0;
+
+      if (spec.zero_pad && with_sign) {
+        auto r0 = write(sink, std::string_view{"-", 1});
+        if (!r0) return std::unexpected(r0.error());
+        total += *r0;
+
+        auto rp = write_pad(sink, pad_ch, pad);
+        if (!rp) return std::unexpected(rp.error());
+        total += *rp;
+      } else {
+        auto rp = write_pad(sink, pad_ch, pad);
+        if (!rp) return std::unexpected(rp.error());
+        total += *rp;
+
+        if (with_sign) {
+          auto r0 = write(sink, std::string_view{"-", 1});
+          if (!r0) return std::unexpected(r0.error());
+          total += *r0;
+        }
+      }
+
+      auto r1 = write(sink, core);
+      if (!r1) return std::unexpected(r1.error());
+      total += *r1;
+      return ok(total);
+    };
+
+    // NaN / Inf
+    if (exp == 0xFFu) {
+      const bool is_nan = (mant != 0);
+      const bool is_inf = (mant == 0);
+
+      const bool upper = spec.upper; // 'F' 会让 upper=true（你现有逻辑）
+      const char* s = nullptr;
+      if (is_nan) s = upper ? "NAN" : "nan";
+      else if (is_inf) s = upper ? "INF" : "inf";
+      else s = upper ? "NAN" : "nan";
+
+      // nan 通常不带符号；inf 可以带符号（这里给 inf 带符号）
+      const bool sign = (!is_nan) && neg;
+      return emit_with_width(std::string_view{s, 3}, sign);
+    }
+
+    // abs：清符号位，避免引入 fabsf
+    const float av = std::bit_cast<float>(bits & 0x7FFFFFFFu);
+
+    std::uint32_t ip = static_cast<std::uint32_t>(av);
+
+    std::uint32_t frac_scaled = 0;
+    std::uint32_t pow10 = 1u;
+
+    if (prec == 0) {
+      // 四舍五入到整数
+      const float rounded = av + 0.5f;
+      ip = static_cast<std::uint32_t>(rounded);
+    } else {
+      pow10 = pow10_u32[prec];
+      const float frac = av - static_cast<float>(ip);
+      const float scaled = frac * static_cast<float>(pow10) + 0.5f;
+      frac_scaled = static_cast<std::uint32_t>(scaled);
+
+      // 处理 0.999999.. rounding carry
+      if (frac_scaled >= pow10) {
+        frac_scaled = 0;
+        ++ip;
+      }
+    }
+
+    // 组装 core（不含 sign），便于 width 计算
+    char buf[32];
+    char* p = buf;
+    char* end = buf + sizeof(buf);
+
+    auto [ptr, ec] = std::to_chars(p, end, ip, 10);
+    if (ec != std::errc{}) return std::unexpected(errc::buffer_overflow);
+    p = ptr;
+
+    if (prec != 0) {
+      if (p >= end) return std::unexpected(errc::buffer_overflow);
+      *p++ = '.';
+
+      // 写入 prec 位小数（带前导 0）
+      if (static_cast<std::size_t>(end - p) < prec)
+        return std::unexpected(errc::buffer_overflow);
+
+      char* q = p + prec;
+      std::uint32_t x = frac_scaled;
+      for (std::uint8_t i = 0; i < prec; ++i) {
+        *--q = static_cast<char>('0' + (x % 10u));
+        x /= 10u;
+      }
+      p += prec;
+    }
+
+    const std::string_view core{buf, static_cast<std::size_t>(p - buf)};
+    return emit_with_width(core, neg);
+  }
+
+} // namespace detail
+
+#endif // OUT_ENABLE_FLOAT
+
+  // 统一入口：按类型写一个参数
+  // TODO: 编译期字符串拼接
+  /* TODO: ANSI token 的“默认无色/静默”行为需要补齐  （当前write_one 默认分支不识别的类型会返回 invalid_format）
+   * 补齐方式：给 reset/bold/fg/bg 这些 token 增加一个“非 AnsiSink 时的 no-op overload”，
+   * 返回 ok(0u)，并用 requires 做分派（AnsiSink 优先匹配）。
+   * 这样“默认无色”就成立，而且不会影响 Enabled=false 的编译期裁剪优势。
+   */
+  template <class S, class T>
+  inline result<std::size_t> write_one(S& sink, const T& value, fmt_spec spec) noexcept {
+    if constexpr (std::is_same_v<T, char>) {
+      char c = value;
+      return write(sink, std::string_view{&c, 1});
+    } else if constexpr (std::is_convertible_v<T, std::string_view>) {
+      return write(sink, std::string_view(value));
+    } else if constexpr (std::is_floating_point_v<T>) {
+#ifdef OUT_ENABLE_FLOAT
+      // return write_float(sink, value, spec);
+      // 禁止 double，强制用 float
+      if constexpr (std::is_same_v<T, double>) {
+        static_assert(dependent_false_v<T>,
+          "double formatting is disabled on MCU. "
+          "Use float (e.g. 3.14159f) to avoid huge code size.");
+        return std::unexpected(errc::invalid_format);
+      } else {
+        return detail::write_float_fixed_mcu(sink, static_cast<float>(value), spec);
+      }
+#else
+      static_assert(dependent_false_v<T>,
+        "floating-point formatting requested but OUT_ENABLE_FLOAT is not defined");
+      return std::unexpected(errc::invalid_format);
+#endif
+    } else if constexpr (std::is_integral_v<T> || std::is_enum_v<T>) {
+      // using Raw = std::conditional_t<std::is_enum_v<T>, std::underlying_type_t<T>, T>;
+      using Raw = enum_underlying_or_self_t<T>;
+      using U   = std::make_unsigned_t<Raw>;
+
+      auto pick_base = [&](char t) -> unsigned {
+        if (t == 'x' || t == 'X') return 16;
+        if (t == 'b' || t == 'B') return 2;
+        return 10;
+      };
+
+      Raw rv = static_cast<Raw>(value);
+
+      if constexpr (std::is_signed_v<Raw>) {
+        if (rv < 0) {
+          auto r = write(sink, std::string_view{"-", 1});
+          if (!r) return std::unexpected(r.error());
+          if (spec.width > 0) --spec.width;
+
+          // 生成绝对值（覆盖 INT_MIN / 最小值）
+          U uv = static_cast<U>(rv);
+          uv = U(0) - uv;
+
+          unsigned base = pick_base(spec.type);
+#ifndef OUT_ENABLE_BINARY
+          if (base == 2) return std::unexpected(errc::invalid_format);
+#endif
+          auto rr = write_uint_base(sink, uv, base, spec);
+          if (!rr) return std::unexpected(rr.error());
+          return ok(*r + *rr);
+        }
+      }
+
+      U uv = static_cast<U>(rv);
+      unsigned base = pick_base(spec.type);
+#ifndef OUT_ENABLE_BINARY
+      if (base == 2) return std::unexpected(errc::invalid_format);
+#endif
+      return write_uint_base(sink, uv, base, spec);
+    } else {
+      // 你可以在这里挂载自定义 formatter：formatter<T>::write(...)
+      return std::unexpected(errc::invalid_format);
+    }
+  }
+
+  // format 输出：编译期解析 + runtime 展开
+  /* TODO: vprint() 运行时 for-loop + idx 分派可以进一步“编译期展开 token”
+   * 现在的 vprint() 是：
+   *    编译期解析出 pf
+   *    运行时 for i < pf.ntok
+   *    对每个 arg token 用 index_sequence 做“参数分派”
+   * 很多编译器会优化得不错，但在 MCU 工程里，更倾向提供一个 可选的“完全编译期展开 token”路径（例如用 std::index_sequence<pf.ntok> 对 token 下标 fold），做到：
+   *    token 遍历不产生运行时循环
+   *    每个 token 的 kind 在编译期已知，分支可完全消除
+   *    可进一步确保“零成本抽象”在所有编译器上更稳定
+   * 可以把它做成：
+   *    默认保持现状（更短的编译时间）
+   *    OUT_UNROLL_TOKENS 开关启用全展开（更极致）
+   */
+  // TODO: 不支持的类型尽量“编译期报错”，并给出扩展点范式，现在默认是返回 invalid_format
+  template <fixed_string Fmt, Sink S, class... Args>
+  inline result<std::size_t> vprint(S& sink, Args&&... args) noexcept {
+    constexpr auto pf = parse_format<Fmt>();
+#if defined(OUT_ENABLE_FLOAT)
+    static_assert(!needs_float_non_fixed(pf),
+      "MCU float backend only supports fixed format {:f}. "
+      "Please use {:f} / {:.Nf} (or implement another backend).");
+#endif
+    static_assert(pf.valid, "format string invalid");
+    static_assert(pf.nargs == sizeof...(Args), "format args count mismatch");
+
+#ifndef OUT_ENABLE_BINARY
+    static_assert(!needs_binary(pf),
+      "binary formatting requested (use {:b}) but OUT_ENABLE_BINARY is not defined");
+#endif
+
+#ifndef OUT_ENABLE_FLOAT
+    static_assert(!needs_float_spec(pf),
+      "float formatting spec requested (use {:f}/{:e}/{:g}) but OUT_ENABLE_FLOAT is not defined");
+#endif
+
+    // 参数打包成 tuple 方便按索引取
+    auto tup = std::forward_as_tuple(std::forward<Args>(args)...);
+
+    std::size_t total = 0;
+    for (std::size_t i = 0; i < pf.toks.size(); ++i) {
+      const auto& tk = pf.toks[i];
+      if (tk.kind == token_kind::lit) {
+        auto sv = pf.text.substr(tk.pos, tk.len);
+        auto r = write(sink, sv);
+        if (!r) return std::unexpected(r.error());
+        total += *r;
+      } else {
+        // 按索引取参数并写出
+        auto idx = tk.arg_index;
+        result<std::size_t> r = std::unexpected(errc::invalid_format);
+
+        // 小技巧：用 lambda + index_sequence 做 compile-time 分发
+        [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+          ((idx == Is ? r = write_one(sink, std::get<Is>(tup), tk.spec) : r), ...);
+        }(std::make_index_sequence<sizeof...(Args)>{});
+
+        if (!r) return std::unexpected(r.error());
+        total += *r;
+      }
+    }
+    return ok(total);
+  }
+
+}
