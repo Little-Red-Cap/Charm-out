@@ -10,9 +10,9 @@ import out.core;
 namespace out::port {
 
     result<std::size_t> console_sink::write(const bytes b) noexcept {
-        auto state = HAL_UART_Transmit(&huart1, reinterpret_cast<const uint8_t*>(b.data()), b.size(), HAL_MAX_DELAY);
-        if (HAL_OK != state) return std::unexpected(errc::io_error);
-        return ok(state);
+        if (HAL_OK != HAL_UART_Transmit(&huart1, reinterpret_cast<const uint8_t*>(b.data()), b.size(), HAL_MAX_DELAY))
+            return std::unexpected(errc::io_error);
+        return ok(b.size());
     }
 
     result<std::size_t> uart_sink::write(const bytes b) const noexcept {
