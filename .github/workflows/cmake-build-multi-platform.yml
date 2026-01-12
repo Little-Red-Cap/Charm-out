@@ -71,11 +71,11 @@ jobs:
 
     # 更新libc++，std::expected需要新版本库
     - name: Install libc++ (Ubuntu only)
-      if: matrix.os == 'ubuntu-latest'
+      if: matrix.os == 'ubuntu-latest' && matrix.c_compiler == 'clang'
       shell: bash
       run: |
-        sudo apt-get update
-        sudo apt-get install -y libc++-dev libc++abi-dev
+        apt-get update
+        apt-get install -y libc++-dev libc++abi-dev
 
     - name: Set reusable strings
       # Turn repeated input strings (such as the build output directory) into step outputs. These step outputs can be used throughout the workflow file.
