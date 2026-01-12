@@ -9,6 +9,7 @@ on:
     branches: [ "main" ]
 
 jobs:
+  container: ${{ matrix.container }}
   build:
     runs-on: ${{ matrix.os }}
 
@@ -33,6 +34,7 @@ jobs:
           - os: ubuntu-latest
             c_compiler: gcc
             cpp_compiler: g++
+            container: gcc:15.2.0   # 或 gcc:15
           - os: ubuntu-latest
             c_compiler: clang
             cpp_compiler: clang++
@@ -45,6 +47,13 @@ jobs:
             c_compiler: cl
 
     steps:
+    - name: Install prerequisites (container only)
+      if: matrix.container != ''
+      shell: bash
+      run: |
+        apt-get update
+        apt-get install -y git ca-certificates
+
     - uses: actions/checkout@v4
 
     # 使用新版CMake
