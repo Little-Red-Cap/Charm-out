@@ -1,5 +1,6 @@
 module;
 #include <span>
+#include <array>
 #include <string_view>
 #include <expected>
 #include <cstring>
