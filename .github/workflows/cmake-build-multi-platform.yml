@@ -8,8 +8,9 @@ on:
   pull_request:
     branches: [ "main" ]
 
+container: ${{ matrix.container }}
+
 jobs:
-  container: ${{ matrix.container }}
   build:
     runs-on: ${{ matrix.os }}
 
