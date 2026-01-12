@@ -10,7 +10,7 @@
 [![C++20 Modules](https://img.shields.io/badge/Modules-C%2B%2B20-blue.svg?style=flat-square)](https://en.cppreference.com/w/cpp/language/modules)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
 
-[快速开始](#-快速开始) · [文档](doc/) · [示例](examples/)
+[快速开始](#-快速开始) · [文档](doc/) · [示例](examples/) · [基准测试](#-性能数据)
 </div>
 
 [English](doc/README_en.md) | [简体中文](README.md)
@@ -261,6 +261,43 @@ namespace out::port {
 ### 平台示例
 
 <details>
+<summary><b>PC (stdio)</b></summary>
+
+```cpp
+module;
+#include <chrono>
+#include <expected>
+
+module out.port;
+import out.core;
+
+
+namespace out::port {
+
+    result<std::size_t> console_sink::write(const bytes b) noexcept {
+        auto n = std::fwrite(b.data(), 1, b.size(), stdout);
+        std::fflush(stdout);
+        if (n != b.size()) return std::unexpected(errc::io_error);
+        return ok(n);
+    }
+
+    result<std::size_t> uart_sink::write(const bytes b) const noexcept {
+        (void)handle;
+        return console_sink{}.write(b);
+    }
+
+    tick_t now_ms() noexcept {
+        using namespace std::chrono;
+        auto ms = duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+        return static_cast<tick_t>(ms);
+    }
+
+}
+
+```
+</details>
+
+<details>
 <summary><b>STM32 (HAL)</b></summary>
 
 ```cpp
@@ -377,6 +414,8 @@ out/
 
 <div align="center">
 
+问题反馈：[GitHub Issues](https://github.com/Little-Red-Cap/Charm-out/issues)
+<br>
 **⭐ 如果这个项目对你有帮助，请给个 Star！**
 
 [回到顶部](#charm-out)
