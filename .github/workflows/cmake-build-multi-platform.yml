@@ -47,6 +47,16 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    # 使用新版CMake
+    - name: Install CMake (>=4.0) and Ninja
+      uses: lukka/get-cmake@latest
+      with:
+        cmakeVersion: 4.1.2
+        ninjaVersion: latest
+    # 验证装好没有
+    - name: Verify CMake
+      run: cmake --version
+
     - name: Set reusable strings
       # Turn repeated input strings (such as the build output directory) into step outputs. These step outputs can be used throughout the workflow file.
       id: strings
