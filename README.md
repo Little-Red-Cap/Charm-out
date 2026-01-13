@@ -10,7 +10,7 @@
 [![C++20 Modules](https://img.shields.io/badge/Modules-C%2B%2B20-blue.svg?style=flat-square)](https://en.cppreference.com/w/cpp/language/modules)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
 <br>
-[![CLangBuild Status](https://github.com/Little-Red-Cap/Charm-out/actions/workflows/build-clang.yml/badge.svg)](https://github.com/Little-Red-Cap/Charm-out/actions)
+[![CLang Build Status](https://github.com/Little-Red-Cap/Charm-out/actions/workflows/build-clang.yml/badge.svg)](https://github.com/Little-Red-Cap/Charm-out/actions)
 
 [快速开始](#-快速开始) · [文档](doc/) · [示例](examples/) · [基准测试](#-性能数据)
 </div>
