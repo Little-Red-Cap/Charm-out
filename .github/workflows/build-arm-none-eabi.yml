@@ -17,7 +17,7 @@ jobs:
         with:
           release: "15.2.Rel1"
 
-      # 固定使用新版 CMake + Ninja，避免 runner 自带版本不满足 4.0
+      # 固定使用新版 CMake + Ninja，避免 runner 自带CMake版本 < 4.0
       - name: Install CMake 4.1.2 and Ninja
         uses: lukka/get-cmake@latest
         with:
@@ -44,3 +44,36 @@ jobs:
       - name: Size
         run: |
           arm-none-eabi-size build-stm32/*.elf || true
+          
+
+      # 生成一个可下载/可比对的体积报告
+      - name: Size report
+        shell: pwsh
+        run: |
+          $elfs = Get-ChildItem -Path build-stm32 -Recurse -Filter *.elf -ErrorAction SilentlyContinue
+          if (-not $elfs) {
+            Write-Host "No .elf produced under build-stm32"
+            exit 1
+          }
+
+          "=== arm-none-eabi-size ===" | Out-File -Encoding utf8 build-stm32/size.txt
+          foreach ($e in $elfs) {
+            "`n--- $($e.FullName) ---" | Out-File -Append -Encoding utf8 build-stm32/size.txt
+            arm-none-eabi-size $e.FullName | Out-File -Append -Encoding utf8 build-stm32/size.txt
+          }
+
+          Get-Content build-stm32/size.txt
+
+      # 上传构建产物：elf/map/bin（顺便把 size.txt 也一起传上去）
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: stm32f103c8-${{ github.sha }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            build-stm32/**/*.elf
+            build-stm32/**/*.map
+            build-stm32/**/*.bin
+            build-stm32/**/*.hex
+            build-stm32/size.txt
