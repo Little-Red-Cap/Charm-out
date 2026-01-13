@@ -25,7 +25,7 @@ target_include_directories(${target_name}
         PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
 )
-target_compile_features(${target_name} PUBLIC cxx_std_26)
+#target_compile_features(${target_name} PUBLIC cxx_std_26)
 
 
 
