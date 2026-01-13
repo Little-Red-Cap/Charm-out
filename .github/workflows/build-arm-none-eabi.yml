@@ -8,7 +8,7 @@ on:
 
 jobs:
   stm32:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -17,10 +17,12 @@ jobs:
         with:
           release: "15.2.Rel1"
 
-      - name: Install Ninja + CMake
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ninja-build cmake
+      # 固定使用新版 CMake + Ninja，避免 runner 自带版本不满足 4.0
+      - name: Install CMake 4.1.2 and Ninja
+        uses: lukka/get-cmake@latest
+        with:
+          cmakeVersion: 4.1.2
+          ninjaVersion: latest
 
       - name: Verify toolchain
         run: |
