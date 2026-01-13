@@ -32,9 +32,9 @@ jobs:
 
       - name: Configure (STM32 subproject)
         run: |
-          cmake -G Ninja \
-            -S examples/stm32f103c8 \
-            -B build-stm32 \
+          cmake -G Ninja `
+            -S examples/stm32f103c8 `
+            -B build-stm32 `
             -DCMAKE_BUILD_TYPE=Release
 
       - name: Build (STM32)
