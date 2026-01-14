@@ -70,7 +70,7 @@ jobs:
         with:
           name: stm32f103c8-${{ github.sha }}
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 7
           path: |
             build-stm32/**/*.elf
             build-stm32/**/*.map
