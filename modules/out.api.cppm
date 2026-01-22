@@ -16,7 +16,7 @@ export import out.sink;
 
 export namespace out {
 
-    // 懒求值包装器（可选，但非常实用）
+    // Lazy wrapper for deferred evaluation.
     template <class F>
     struct lazy_t { F f; };
 
@@ -35,56 +35,115 @@ export namespace out {
     template <class F>
     constexpr decltype(auto) eval(lazy_t<F>&& lz) { return lz.f(); }
 
-    // ✅ 统一入口：带 level + domain
+    // Unified entry: level + domain.
+    // Note: lazy args are evaluated only in try_emit/try_emitln. Keep wrappers forwarding.
     template <level L, class Domain, fixed_string Fmt, Sink S, class... Args>
-    inline result<std::size_t> emit(S& sink, Args&&... args) noexcept {
+    inline result<std::size_t> try_emit(S& sink, Args&&... args) noexcept {
         if constexpr (build_level >= L && L != level::off && domain_enabled<Domain>) {
-            return println<Fmt>(sink, eval(std::forward<Args>(args))...);
+            return try_print<Fmt>(sink, eval(std::forward<Args>(args))...);
         } else {
             return ok(0u);
         }
     }
 
-    // ✅ 门面：默认域 default_domain
+    template <level L, class Domain, fixed_string Fmt, Sink S, class... Args>
+    inline result<std::size_t> try_emitln(S& sink, Args&&... args) noexcept {
+        if constexpr (build_level >= L && L != level::off && domain_enabled<Domain>) {
+            auto r = try_print<Fmt>(sink, eval(std::forward<Args>(args))...);
+            if (!r) return r;
+            auto rn = write(sink, "\r\n");
+            if (!rn) return std::unexpected(rn.error());
+            return ok(*r + *rn);
+        } else {
+            return ok(0u);
+        }
+    }
+
+    template <level L, class Domain, fixed_string Fmt, Sink S, class... Args>
+    inline void emit(S& sink, Args&&... args) noexcept {
+        out::discard(try_emitln<L, Domain, Fmt>(sink, std::forward<Args>(args)...));
+    }
+
+    // Convenience overloads: default_domain.
     template <fixed_string Fmt, Sink S, class... Args>
-    inline result<std::size_t> error(S& s, Args&&... a) noexcept {
-        return emit<level::error, default_domain, Fmt>(s, std::forward<Args>(a)...);
+    inline result<std::size_t> try_error(S& s, Args&&... a) noexcept {
+        return try_emitln<level::error, default_domain, Fmt>(s, std::forward<Args>(a)...);
     }
     template <fixed_string Fmt, class... Args>
-    inline result<std::size_t> error(Args&&... a) noexcept {
-        return error<Fmt>(port::default_console(), std::forward<Args>(a)...);
+    inline result<std::size_t> try_error(Args&&... a) noexcept {
+        return try_error<Fmt>(port::default_console(), std::forward<Args>(a)...);
     }
     template <fixed_string Fmt, Sink S, class... Args>
-    inline result<std::size_t> warn(S& s, Args&&... a) noexcept {
-        return emit<level::warn, default_domain, Fmt>(s, std::forward<Args>(a)...);
+    inline void error(S& s, Args&&... a) noexcept {
+        out::discard(try_error<Fmt>(s, std::forward<Args>(a)...));
     }
     template <fixed_string Fmt, class... Args>
-    inline result<std::size_t> warn(Args&&... a) noexcept {
-        return warn<Fmt>(port::default_console(), std::forward<Args>(a)...);
+    inline void error(Args&&... a) noexcept {
+        out::discard(try_error<Fmt>(port::default_console(), std::forward<Args>(a)...));
     }
     template <fixed_string Fmt, Sink S, class... Args>
-    inline result<std::size_t> info(S& s, Args&&... a) noexcept {
-        return emit<level::info, default_domain, Fmt>(s, std::forward<Args>(a)...);
+    inline result<std::size_t> try_warn(S& s, Args&&... a) noexcept {
+        return try_emitln<level::warn, default_domain, Fmt>(s, std::forward<Args>(a)...);
     }
     template <fixed_string Fmt, class... Args>
-    inline result<std::size_t> info(Args&&... a) noexcept {
-        return info<Fmt>(port::default_console(), std::forward<Args>(a)...);
+    inline result<std::size_t> try_warn(Args&&... a) noexcept {
+        return try_warn<Fmt>(port::default_console(), std::forward<Args>(a)...);
     }
     template <fixed_string Fmt, Sink S, class... Args>
-    inline result<std::size_t> debug(S& s, Args&&... a) noexcept {
-        return emit<level::debug, default_domain, Fmt>(s, std::forward<Args>(a)...);
+    inline void warn(S& s, Args&&... a) noexcept {
+        out::discard(try_warn<Fmt>(s, std::forward<Args>(a)...));
     }
     template <fixed_string Fmt, class... Args>
-    inline result<std::size_t> debug(Args&&... a) noexcept {
-        return debug<Fmt>(port::default_console(), std::forward<Args>(a)...);
+    inline void warn(Args&&... a) noexcept {
+        out::discard(try_warn<Fmt>(port::default_console(), std::forward<Args>(a)...));
     }
     template <fixed_string Fmt, Sink S, class... Args>
-    inline result<std::size_t> trace(S& s, Args&&... a) noexcept {
-        return emit<level::trace, default_domain, Fmt>(s, std::forward<Args>(a)...);
+    inline result<std::size_t> try_info(S& s, Args&&... a) noexcept {
+        return try_emitln<level::info, default_domain, Fmt>(s, std::forward<Args>(a)...);
     }
     template <fixed_string Fmt, class... Args>
-    inline result<std::size_t> trace(Args&&... a) noexcept {
-        return trace<Fmt>(port::default_console(), std::forward<Args>(a)...);
+    inline result<std::size_t> try_info(Args&&... a) noexcept {
+        return try_info<Fmt>(port::default_console(), std::forward<Args>(a)...);
+    }
+    template <fixed_string Fmt, Sink S, class... Args>
+    inline void info(S& s, Args&&... a) noexcept {
+        out::discard(try_info<Fmt>(s, std::forward<Args>(a)...));
+    }
+    template <fixed_string Fmt, class... Args>
+    inline void info(Args&&... a) noexcept {
+        out::discard(try_info<Fmt>(port::default_console(), std::forward<Args>(a)...));
+    }
+    template <fixed_string Fmt, Sink S, class... Args>
+    inline result<std::size_t> try_debug(S& s, Args&&... a) noexcept {
+        return try_emitln<level::debug, default_domain, Fmt>(s, std::forward<Args>(a)...);
+    }
+    template <fixed_string Fmt, class... Args>
+    inline result<std::size_t> try_debug(Args&&... a) noexcept {
+        return try_debug<Fmt>(port::default_console(), std::forward<Args>(a)...);
+    }
+    template <fixed_string Fmt, Sink S, class... Args>
+    inline void debug(S& s, Args&&... a) noexcept {
+        out::discard(try_debug<Fmt>(s, std::forward<Args>(a)...));
+    }
+    template <fixed_string Fmt, class... Args>
+    inline void debug(Args&&... a) noexcept {
+        out::discard(try_debug<Fmt>(port::default_console(), std::forward<Args>(a)...));
+    }
+    template <fixed_string Fmt, Sink S, class... Args>
+    inline result<std::size_t> try_trace(S& s, Args&&... a) noexcept {
+        return try_emitln<level::trace, default_domain, Fmt>(s, std::forward<Args>(a)...);
+    }
+    template <fixed_string Fmt, class... Args>
+    inline result<std::size_t> try_trace(Args&&... a) noexcept {
+        return try_trace<Fmt>(port::default_console(), std::forward<Args>(a)...);
+    }
+    template <fixed_string Fmt, Sink S, class... Args>
+    inline void trace(S& s, Args&&... a) noexcept {
+        out::discard(try_trace<Fmt>(s, std::forward<Args>(a)...));
+    }
+    template <fixed_string Fmt, class... Args>
+    inline void trace(Args&&... a) noexcept {
+        out::discard(try_trace<Fmt>(port::default_console(), std::forward<Args>(a)...));
     }
 
     namespace detail {
@@ -100,8 +159,14 @@ export namespace out {
         template <class S>
         constexpr S* base_ptr(sink_ref<S>& s) noexcept { return s.base; }
 
+        template <class S>
+        constexpr S* base_ptr(const sink_ref<S>& s) noexcept { return s.base; }
+
         template <class S, bool Enabled>
         constexpr S* base_ptr(ansi::ansi_sink_ref<S, Enabled>& s) noexcept { return s.base; }
+
+        template <class S, bool Enabled>
+        constexpr S* base_ptr(const ansi::ansi_sink_ref<S, Enabled>& s) noexcept { return s.base; }
     }
 
     enum class newline : std::uint8_t { none, lf, crlf };
@@ -179,13 +244,23 @@ export namespace out {
         }
 
         template <fixed_string Fmt, class... Args>
-        inline result<std::size_t> print(Args&&... args) noexcept {
-            return emit<false, Fmt>(std::forward<Args>(args)...);
+        inline result<std::size_t> try_print(Args&&... args) noexcept {
+            return try_emit_impl<false, Fmt>(std::forward<Args>(args)...);
         }
 
         template <fixed_string Fmt, class... Args>
-        inline result<std::size_t> println(Args&&... args) noexcept {
-            return emit<true, Fmt>(std::forward<Args>(args)...);
+        inline result<std::size_t> try_println(Args&&... args) noexcept {
+            return try_emit_impl<true, Fmt>(std::forward<Args>(args)...);
+        }
+
+        template <fixed_string Fmt, class... Args>
+        inline void print(Args&&... args) noexcept {
+            out::discard(try_print<Fmt>(std::forward<Args>(args)...));
+        }
+
+        template <fixed_string Fmt, class... Args>
+        inline void println(Args&&... args) noexcept {
+            out::discard(try_println<Fmt>(std::forward<Args>(args)...));
         }
 
     private:
@@ -227,12 +302,12 @@ export namespace out {
         }
 
         template <bool WithNewline, fixed_string Fmt, class... Args>
-        inline result<std::size_t> emit(Args&&... args) noexcept {
+        inline result<std::size_t> try_emit_impl(Args&&... args) noexcept {
             if constexpr (build_level >= L && L != level::off && domain_enabled<Domain>) {
                 std::size_t total = 0;
 
                 if (with_timestamp) {
-                    auto rts = out::print<"[{}] ">(sink, port::now_ms());
+                    auto rts = out::try_print<"[{}] ">(sink, port::now_ms());
                     if (!rts) return std::unexpected(rts.error());
                     total += *rts;
                 }

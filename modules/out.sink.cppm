@@ -8,10 +8,10 @@ module;
 export module out.sink;
 
 import out.core;
-// TODO: 增加编译期端序转换
+// TODO: add compile-time endian conversion helpers.
 export namespace out {
 
-    // Sink 概念：任何实现 write(bytes) 的类型
+    // Sink concept: any type that implements write(bytes).
     template <class S>
     concept Sink = requires(S& s, bytes b) {
         { s.write(b) } -> std::same_as<result<std::size_t>>;
@@ -20,9 +20,11 @@ export namespace out {
     template <class S>
     concept Flushable = requires(S& s) {
         { s.flush() } -> std::same_as<result<std::size_t>>;
+    } || requires(const S& s) {
+        { s.flush() } -> std::same_as<result<std::size_t>>;
     };
 
-    // 便捷函数：从 string_view 写入
+    // Convenience: write from string_view.
     template <Sink S>
     inline result<std::size_t> write(S& s, std::string_view sv) noexcept {
         auto b = bytes{reinterpret_cast<const std::byte*>(sv.data()), sv.size()};
@@ -30,10 +32,9 @@ export namespace out {
     }
 
     // ------------------------------------------------------------------
-    // 轻量通用适配器（不再单独提供 out.sinks 模块）
+    // Lightweight adapters (no separate out.sinks module).
 
-    // 1) 固定缓冲区：便于单元测试/收集输出
-    // Fixed-size buffer sink.
+    // 1) Fixed-size buffer: useful for tests/output capture.
     // Intended for testing, logging capture, or diagnostics.
     // Not suitable as a general-purpose streaming sink.
     template <std::size_t N>
@@ -52,12 +53,12 @@ export namespace out {
         void clear() noexcept { pos = 0; }
     };
 
-    // 2) 空输出：用于静默/基准
+    // 2) Null sink: silent output for baselines.
     struct null_sink {
         result<std::size_t> write(bytes b) noexcept { return ok(b.size()); }
     };
 
-    // 3) 行缓冲：累积一行后批量写入（用于 UART/慢速设备）
+    // 3) Line buffer: flushes on newline (useful for UART/slow devices).
     template <Sink BaseSink, std::size_t BufSize = 128>
     struct line_buffered_sink {
         BaseSink& base;
@@ -94,8 +95,8 @@ export namespace out {
             return r;
         }
 
-        ~line_buffered_sink() { (void)flush(); }
         // Destructor flushes best-effort; errors are intentionally ignored.
+        ~line_buffered_sink() { (void)flush(); }
     };
 
 }

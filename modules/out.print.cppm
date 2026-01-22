@@ -8,29 +8,30 @@ import out.port;
 
 export namespace out {
 
+    // ----------------------------
+    // Checked APIs (result<T>)
+    // ----------------------------
     template <fixed_string Fmt, Sink S, class... Args>
-    inline result<std::size_t> print(S& sink, Args&&... args) noexcept {
+    inline result<std::size_t> try_print(S& sink, Args&&... args) noexcept {
         return vprint<Fmt>(sink, std::forward<Args>(args)...);
     }
 
     template <fixed_string Fmt, class... Args>
-    inline result<std::size_t> print(Args&&... args) noexcept {
-        return print<Fmt>(port::default_console(), std::forward<Args>(args)...);
+    inline result<std::size_t> try_print(Args&&... args) noexcept {
+        return try_print<Fmt>(port::default_console(), std::forward<Args>(args)...);
     }
 
+    // ----------------------------
+    // Fire-and-forget APIs (void)
+    // ----------------------------
     template <fixed_string Fmt, Sink S, class... Args>
-    inline result<std::size_t> println(S& sink, Args&&... args) noexcept {
-        auto r = print<Fmt>(sink, std::forward<Args>(args)...);
-        if (!r) return r;
-        // Note: newline policy is handled by logger, not by print/println.
-        auto rn = write(sink, "\r\n");
-        if (!rn) return std::unexpected(rn.error());
-        return *r + *rn;
+    inline void print(S& sink, Args&&... args) noexcept {
+        out::discard(try_print<Fmt>(sink, std::forward<Args>(args)...));
     }
 
     template <fixed_string Fmt, class... Args>
-    inline result<std::size_t> println(Args&&... args) noexcept {
-        return println<Fmt>(port::default_console(), std::forward<Args>(args)...);
+    inline void print(Args&&... args) noexcept {
+        out::discard(try_print<Fmt>(std::forward<Args>(args)...));
     }
 
 }

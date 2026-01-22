@@ -11,7 +11,7 @@ template <>
 struct out::formatter<vec2> {
     template <class S>
     static out::result<std::size_t> write(S& sink, const vec2& v, out::fmt_spec) noexcept {
-        return out::print<"({}, {})">(sink, v.x, v.y);
+        return out::try_print<"({}, {})">(sink, v.x, v.y);
     }
 };
 
@@ -29,7 +29,7 @@ extern "C" void example()
     // ------------------------------------------------------------
     // Minimal: Hello world
     // ------------------------------------------------------------
-    out::println<"Hello world!">(console);
+    out::print<"Hello world!\r\n">(console);
     out::info<"Default console works too.">();
 
     // ------------------------------------------------------------
@@ -78,7 +78,7 @@ extern "C" void example()
         out::debug<"Float precision: f={:.2f}">(console, vf);
     }
 
-    out::println<"==========================">(console);
+    out::print<"==========================\r\n">(console);
 
     // ------------------------------------------------------------
     // ANSI: default (no color) -> injected -> disabled
@@ -104,7 +104,7 @@ extern "C" void example()
         .level_prefix()
         .println<"Colored warning">();
 
-    out::println<"==========================">(console_ansi);
+    out::print<"==========================\r\n">(console_ansi);
 
     // Shorter names via using namespace out
     {
@@ -121,7 +121,7 @@ extern "C" void example()
         info<"{}{} cancel dim and bold">(console_ansi, "\x1b[22m", text);
         info<"{}{} is reset">(console_ansi, reset, text);
 
-        println<"==========================">(console_ansi);
+        print<"==========================\r\n">(console_ansi);
     }
 
 
@@ -164,12 +164,12 @@ extern "C" void example()
     // Sinks: line-buffered + fixed buffer
     // ------------------------------------------------------------
     out::line_buffered_sink line_buf{console}; // flushes on '\n'.
-    out::println<"Buffered line {}">(line_buf, 1);
+    out::print<"Buffered line {}\r\n">(line_buf, 1);
 
     out::buffer_sink<256> buf;
-    out::println<"Buf: {}">(buf, 123);
-    out::println<"More: {}">(buf, "OK");
-    out::println<"{}">(console, buf.view());
+    out::print<"Buf: {}\r\n">(buf, 123);
+    out::print<"More: {}\r\n">(buf, "OK");
+    out::print<"{}\r\n">(console, buf.view());
 
     // Default console override (useful for tests or redirection)
     out::port::set_default_console(&console);
