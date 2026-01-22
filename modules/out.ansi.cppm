@@ -10,7 +10,7 @@ import out.core;
 import out.sink;
 import out.format; // fmt_spec + write_one protocol
 
-namespace out {
+export namespace out {
     struct reset_t {};
     struct bold_t {};
     struct dim_t {};
