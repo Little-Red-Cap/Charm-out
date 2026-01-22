@@ -123,6 +123,37 @@ export namespace out::ansi {
     inline result<std::size_t> write_one(S& s, bg_t v, fmt_spec) noexcept { return detail::write_code(s, detail::bg_code(v.c)); }
 } // namespace out::ansi
 
+// Non-ANSI sinks: treat ANSI tokens as no-op (default "silent" behavior).
+export namespace out {
+    template <class S>
+    requires (!ansi::detail::AnsiSink<S>)
+    inline result<std::size_t> write_one(S&, reset_t, fmt_spec) noexcept { return ok<std::size_t>(0u); }
+
+    template <class S>
+    requires (!ansi::detail::AnsiSink<S>)
+    inline result<std::size_t> write_one(S&, bold_t, fmt_spec) noexcept { return ok<std::size_t>(0u); }
+
+    template <class S>
+    requires (!ansi::detail::AnsiSink<S>)
+    inline result<std::size_t> write_one(S&, dim_t, fmt_spec) noexcept { return ok<std::size_t>(0u); }
+
+    template <class S>
+    requires (!ansi::detail::AnsiSink<S>)
+    inline result<std::size_t> write_one(S&, italic_t, fmt_spec) noexcept { return ok<std::size_t>(0u); }
+
+    template <class S>
+    requires (!ansi::detail::AnsiSink<S>)
+    inline result<std::size_t> write_one(S&, underline_t, fmt_spec) noexcept { return ok<std::size_t>(0u); }
+
+    template <class S>
+    requires (!ansi::detail::AnsiSink<S>)
+    inline result<std::size_t> write_one(S&, ansi::fg_t, fmt_spec) noexcept { return ok<std::size_t>(0u); }
+
+    template <class S>
+    requires (!ansi::detail::AnsiSink<S>)
+    inline result<std::size_t> write_one(S&, ansi::bg_t, fmt_spec) noexcept { return ok<std::size_t>(0u); }
+}
+
 // ===== 语法糖：把常用符号再导出到 out 命名空间 =====
 export namespace out {
     using ansi::color;
