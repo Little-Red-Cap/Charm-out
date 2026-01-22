@@ -2,10 +2,12 @@
 #include <array>
 #include <cstdint>
 #include <cstdlib>
+#include <charconv>
 #include <expected>
 #include <string_view>
 #include <type_traits>
 #include <utility>
+#include <cstring>
 export module out.logger;
 // Dependency contract (DO NOT VIOLATE)
 // Allowed out.* imports: out.core, out.sink, out.format, out.domain, out.port, out.ansi
@@ -24,6 +26,10 @@ import out.sink;
 #define OUT_LOGGER_NODISCARD [[nodiscard]]
 #else
 #define OUT_LOGGER_NODISCARD
+#endif
+
+#ifndef OUT_LOGGER_WRITE_BUFFER_SIZE
+#define OUT_LOGGER_WRITE_BUFFER_SIZE 128
 #endif
 
 export namespace out {
@@ -244,51 +250,120 @@ export namespace out {
             }
         }
 
+        template <class S>
+        requires (!ansi::AnsiSink<S>)
+        inline result<std::size_t> write_styles_combined(S&, bool) noexcept {
+            return ok<std::size_t>(0u);
+        }
+
+        template <class S>
+        requires ansi::AnsiSink<S>
+        inline result<std::size_t> write_styles_combined(S& s, bool include_reset) noexcept {
+            if (style_count == 0) return ok<std::size_t>(0u);
+
+            char buf[64];
+            std::size_t pos = 0;
+
+            auto append_sv = [&](std::string_view sv) -> bool {
+                if (pos + sv.size() > sizeof(buf)) return false;
+                std::memcpy(buf + pos, sv.data(), sv.size());
+                pos += sv.size();
+                return true;
+            };
+
+            auto append_code = [&](int code) -> bool {
+                char tmp[16];
+                char* p = tmp;
+                *p++ = '\x1b';
+                *p++ = '[';
+                auto [ptr, ec] = std::to_chars(p, tmp + sizeof(tmp), code);
+                if (ec != std::errc{}) return false;
+                *ptr++ = 'm';
+                return append_sv(std::string_view{tmp, static_cast<std::size_t>(ptr - tmp)});
+            };
+
+            bool ok_all = true;
+            for (std::uint8_t i = 0; i < style_count; ++i) {
+                const auto& cmd = styles[i];
+                if (cmd.k == style_cmd::kind::seq) {
+                    if (!append_sv(cmd.seq)) { ok_all = false; break; }
+                } else {
+                    if (!append_code(cmd.code)) { ok_all = false; break; }
+                }
+            }
+
+            if (ok_all && include_reset) {
+                if (!append_sv("\x1b[0m")) ok_all = false;
+            }
+
+            if (ok_all) {
+                return s.write_ansi(std::string_view{buf, pos});
+            }
+
+            std::size_t total = 0;
+            for (std::uint8_t i = 0; i < style_count; ++i) {
+                auto rs = write_style(s, styles[i]);
+                if (!rs) return std::unexpected(rs.error());
+                total += *rs;
+            }
+            if (include_reset) {
+                auto rr = write_style(s, make_style(reset_t{}));
+                if (!rr) return std::unexpected(rr.error());
+                total += *rr;
+            }
+            return ok(total);
+        }
+
         template <bool WithNewline, fixed_string Fmt, class... Args>
         inline result<std::size_t> try_emit_impl(Args&&... args) noexcept {
             if constexpr (domain_enabled<Domain> &&
                           (BypassLevelGate || (L != level::off && build_level >= L))) {
                 std::size_t total = 0;
 
+                detail::buffered_writer<decltype(sink), OUT_LOGGER_WRITE_BUFFER_SIZE> bw{sink};
+
                 if (with_timestamp) {
-                    auto rts = vprint<"[{}] ">(sink, port::now_ms());
+                    auto rts = vprint<"[{}] ", decltype(bw), false>(bw, port::now_ms());
                     if (!rts) return std::unexpected(rts.error());
                     total += *rts;
                 }
 
                 if (with_level) {
                     char buf[4] = {'[', level_tag(), ']', ' '};
-                    auto rp = write(sink, std::string_view{buf, sizeof(buf)});
+                    auto rp = bw.append(std::string_view{buf, sizeof(buf)});
                     if (!rp) return std::unexpected(rp.error());
                     total += *rp;
                 }
 
                 if (with_domain) {
                     if constexpr (domain_name<Domain>.size() != 0) {
-                        auto r1 = write(sink, "[");
+                        auto r1 = bw.append("[");
                         if (!r1) return std::unexpected(r1.error());
                         total += *r1;
-                        auto r2 = write(sink, domain_name<Domain>);
+                        auto r2 = bw.append(domain_name<Domain>);
                         if (!r2) return std::unexpected(r2.error());
                         total += *r2;
-                        auto r3 = write(sink, "] ");
+                        auto r3 = bw.append("] ");
                         if (!r3) return std::unexpected(r3.error());
                         total += *r3;
                     }
                 }
 
-                for (std::uint8_t i = 0; i < style_count; ++i) {
-                    auto rs = write_style(sink, styles[i]);
-                    if (!rs) return std::unexpected(rs.error());
-                    total += *rs;
+                bool need_reset = auto_reset_enabled && style_count > 0;
+                constexpr bool sink_is_ansi = ansi::AnsiSink<decltype(bw)>;
+                auto rs = write_styles_combined(bw, sink_is_ansi && need_reset);
+                if (!rs) return std::unexpected(rs.error());
+                total += *rs;
+                if constexpr (sink_is_ansi) {
+                    if (need_reset) need_reset = false;
                 }
 
-                auto r = vprint<Fmt>(sink, eval(std::forward<Args>(args))...);
+                auto r = vprint<Fmt, decltype(bw), false>(bw, eval(std::forward<Args>(args))...);
                 if (!r) return std::unexpected(r.error());
                 total += *r;
 
-                if (auto_reset_enabled && style_count > 0) {
-                    auto rr = write_style(sink, make_style(reset_t{}));
+                if (need_reset) {
+                    auto rr = write_style(bw, make_style(reset_t{}));
                     if (!rr) return std::unexpected(rr.error());
                     total += *rr;
                 }
@@ -296,10 +371,18 @@ export namespace out {
                 if constexpr (WithNewline) {
                     if (nl != newline::none) {
                         std::string_view nl_sv = (nl == newline::crlf) ? "\r\n" : "\n";
-                        auto rn = write(sink, nl_sv);
+                        auto rn = bw.append(nl_sv);
                         if (!rn) return std::unexpected(rn.error());
                         total += *rn;
+                    }
+                }
 
+                auto rwo = bw.flush();
+                if (!rwo) return std::unexpected(rwo.error());
+                total += *rwo;
+
+                if constexpr (WithNewline) {
+                    if (nl != newline::none) {
                         if (flush_enabled) {
                             auto* base = detail::base_ptr(sink);
                             using base_t = std::remove_reference_t<decltype(*base)>;
@@ -322,3 +405,4 @@ export namespace out {
 }
 
 #undef OUT_LOGGER_NODISCARD
+#undef OUT_LOGGER_WRITE_BUFFER_SIZE

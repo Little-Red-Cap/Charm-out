@@ -50,12 +50,30 @@ export namespace out::ansi {
 
         // ANSI write capability (only available on this wrapper).
         result<std::size_t> write_ansi(std::string_view sv) noexcept {
-            if constexpr (Enabled) return out::write(*base, sv);
-            else return out::ok<std::size_t>(0u);
+            if constexpr (Enabled) {
+                if constexpr (requires(Base& b, std::string_view s) {
+                    { b.write_ansi(s) } -> std::same_as<result<std::size_t>>;
+                }) {
+                    return base->write_ansi(sv);
+                } else {
+                    return out::write(*base, sv);
+                }
+            } else {
+                return out::ok<std::size_t>(0u);
+            }
         }
         result<std::size_t> write_ansi(std::string_view sv) const noexcept {
-            if constexpr (Enabled) return out::write(*base, sv);
-            else return out::ok<std::size_t>(0u);
+            if constexpr (Enabled) {
+                if constexpr (requires(const Base& b, std::string_view s) {
+                    { b.write_ansi(s) } -> std::same_as<result<std::size_t>>;
+                }) {
+                    return base->write_ansi(sv);
+                } else {
+                    return out::write(*base, sv);
+                }
+            } else {
+                return out::ok<std::size_t>(0u);
+            }
         }
     };
 
@@ -176,6 +194,76 @@ export namespace out {
     template <class S>
     requires (!ansi::AnsiSink<S>)
     inline result<std::size_t> write_one(S&, ansi::bg_t, fmt_spec) noexcept { return ok<std::size_t>(0u); }
+
+    // Formatter specializations for ANSI tokens.
+    template <>
+    struct formatter<reset_t> {
+        template <class S>
+        static result<std::size_t> write(S& s, reset_t, fmt_spec) noexcept {
+            if constexpr (ansi::AnsiSink<S>) return s.write_ansi("\x1b[0m");
+            return ok<std::size_t>(0u);
+        }
+    };
+
+    template <>
+    struct formatter<bold_t> {
+        template <class S>
+        static result<std::size_t> write(S& s, bold_t, fmt_spec) noexcept {
+            if constexpr (ansi::AnsiSink<S>) return s.write_ansi("\x1b[1m");
+            return ok<std::size_t>(0u);
+        }
+    };
+
+    template <>
+    struct formatter<dim_t> {
+        template <class S>
+        static result<std::size_t> write(S& s, dim_t, fmt_spec) noexcept {
+            if constexpr (ansi::AnsiSink<S>) return s.write_ansi("\x1b[2m");
+            return ok<std::size_t>(0u);
+        }
+    };
+
+    template <>
+    struct formatter<italic_t> {
+        template <class S>
+        static result<std::size_t> write(S& s, italic_t, fmt_spec) noexcept {
+            if constexpr (ansi::AnsiSink<S>) return s.write_ansi("\x1b[3m");
+            return ok<std::size_t>(0u);
+        }
+    };
+
+    template <>
+    struct formatter<underline_t> {
+        template <class S>
+        static result<std::size_t> write(S& s, underline_t, fmt_spec) noexcept {
+            if constexpr (ansi::AnsiSink<S>) return s.write_ansi("\x1b[4m");
+            return ok<std::size_t>(0u);
+        }
+    };
+
+    template <>
+    struct formatter<ansi::fg_t> {
+        template <class S>
+        static result<std::size_t> write(S& s, ansi::fg_t v, fmt_spec) noexcept {
+            if constexpr (ansi::AnsiSink<S>) return ansi::detail::write_code(s, ansi::detail::fg_code(v.c));
+            return ok<std::size_t>(0u);
+        }
+    };
+
+    template <>
+    struct formatter<ansi::bg_t> {
+        template <class S>
+        static result<std::size_t> write(S& s, ansi::bg_t v, fmt_spec) noexcept {
+            if constexpr (ansi::AnsiSink<S>) return ansi::detail::write_code(s, ansi::detail::bg_code(v.c));
+            return ok<std::size_t>(0u);
+        }
+    };
+}
+
+export namespace out {
+    // ansi_sink_ref emits byte sequences, so ANSI can be treated as bytes.
+    template <class Base, bool Enabled>
+    inline constexpr bool ansi_is_bytes_v<ansi::ansi_sink_ref<Base, Enabled>> = true;
 }
 
 // ===== Sugar: re-export common ANSI tokens into out namespace =====

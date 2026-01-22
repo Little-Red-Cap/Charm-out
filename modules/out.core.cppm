@@ -71,4 +71,8 @@ export namespace out {
 
     template <class T>
     constexpr void discard(const result<T>&) noexcept {}
+
+    // Trait: whether ANSI sequences can be treated as plain bytes for a sink.
+    template <class S>
+    inline constexpr bool ansi_is_bytes_v = false;
 }

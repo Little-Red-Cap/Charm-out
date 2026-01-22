@@ -4,6 +4,7 @@ module;
 #include <utility>
 #include <charconv>
 #include <cstdint>
+#include <cstring>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
@@ -218,6 +219,104 @@ export namespace out {
     template <fixed_string Fmt>
     inline constexpr auto parsed_v = parse_format<Fmt>();
 
+    template <class S, std::size_t N>
+    struct buffered_writer {
+      S& sink;
+      std::array<char, N> buf{};
+      std::size_t pos = 0;
+      std::array<char, 64> ansi_buf{};
+      std::size_t ansi_pos = 0;
+
+      result<std::size_t> flush_ansi() noexcept {
+        if constexpr (ansi_is_bytes_v<S>) {
+          return ok<std::size_t>(0u);
+        }
+        if constexpr (requires(S& s, std::string_view v) { s.write_ansi(v); }) {
+          if (ansi_pos == 0) return ok<std::size_t>(0u);
+          const std::size_t n = ansi_pos;
+          auto r = sink.write_ansi(std::string_view{ansi_buf.data(), ansi_pos});
+          if (!r) return std::unexpected(r.error());
+          ansi_pos = 0;
+          return ok(n);
+        } else {
+          return ok<std::size_t>(0u);
+        }
+      }
+
+      result<std::size_t> flush_bytes() noexcept {
+        if (pos == 0) return ok<std::size_t>(0u);
+        const std::size_t n = pos;
+        auto r = out::write(sink, std::string_view{buf.data(), pos});
+        if (!r) return std::unexpected(r.error());
+        pos = 0;
+        return ok(n);
+      }
+
+      result<std::size_t> flush() noexcept {
+        auto ra = flush_ansi();
+        if (!ra) return std::unexpected(ra.error());
+        auto rb = flush_bytes();
+        if (!rb) return std::unexpected(rb.error());
+        return ok(*ra + *rb);
+      }
+
+      result<std::size_t> append(std::string_view sv) noexcept {
+        if constexpr (!ansi_is_bytes_v<S>) {
+          auto ra = flush_ansi();
+          if (!ra) return std::unexpected(ra.error());
+        }
+        const std::size_t len = sv.size();
+        while (!sv.empty()) {
+          std::size_t space = N - pos;
+          if (space == 0) {
+            auto r = flush_bytes();
+            if (!r) return std::unexpected(r.error());
+            space = N;
+          }
+          const std::size_t n = (sv.size() < space) ? sv.size() : space;
+          std::memcpy(buf.data() + pos, sv.data(), n);
+          pos += n;
+          sv.remove_prefix(n);
+        }
+        return ok(len);
+      }
+
+      result<std::size_t> write(bytes b) noexcept {
+        return append(std::string_view{reinterpret_cast<const char*>(b.data()), b.size()});
+      }
+
+      template <class U = S>
+      requires requires(U& s, std::string_view v) { s.write_ansi(v); }
+      result<std::size_t> write_ansi(std::string_view sv) noexcept {
+        if constexpr (ansi_is_bytes_v<S>) {
+          return append(sv);
+        }
+        auto rb = flush_bytes();
+        if (!rb) return std::unexpected(rb.error());
+        if (sv.size() > ansi_buf.size()) {
+          auto rf = flush_ansi();
+          if (!rf) return std::unexpected(rf.error());
+          return sink.write_ansi(sv);
+        }
+        if (ansi_pos + sv.size() > ansi_buf.size()) {
+          auto rf = flush_ansi();
+          if (!rf) return std::unexpected(rf.error());
+        }
+        std::memcpy(ansi_buf.data() + ansi_pos, sv.data(), sv.size());
+        ansi_pos += sv.size();
+        return ok(sv.size());
+      }
+    };
+
+    template <class T>
+    struct is_buffered_writer : std::false_type {};
+
+    template <class S, std::size_t N>
+    struct is_buffered_writer<buffered_writer<S, N>> : std::true_type {};
+
+    template <class T>
+    inline constexpr bool is_buffered_writer_v = is_buffered_writer<T>::value;
+
     template <auto& PF, std::size_t I, class S, class Tup>
     inline result<std::size_t> emit_token(S& sink, Tup& tup) noexcept {
       constexpr token tk = PF.toks[I];
@@ -231,19 +330,33 @@ export namespace out {
       }
     }
 
-    template <auto& PF, class S, class Tup, std::size_t... Is>
+    template <auto& PF, std::size_t I, class S, class Tup, std::size_t N>
+    inline result<std::size_t> emit_token_buffered(buffered_writer<S, N>& bw, Tup& tup) noexcept {
+      constexpr token tk = PF.toks[I];
+
+      if constexpr (tk.kind == token_kind::lit) {
+        auto sv = PF.text.substr(tk.pos, tk.len);
+        return bw.append(sv);
+      } else {
+        constexpr std::size_t idx = static_cast<std::size_t>(tk.arg_index);
+        return write_one(bw, std::get<idx>(tup), tk.spec);
+      }
+    }
+
+    template <auto& PF, class S, class Tup, std::size_t N, std::size_t... Is>
     inline result<std::size_t> unroll_tokens_seq(
-        S& sink, Tup& tup, std::index_sequence<Is...>) noexcept {
+        buffered_writer<S, N>& bw, Tup& tup, std::index_sequence<Is...>) noexcept {
       std::size_t total = 0;
       errc first_err = errc::ok;
       bool ok_all = true;
 
       auto step = [&](auto r) {
+        if (!ok_all) return;
         if (!r) { ok_all = false; first_err = r.error(); return; }
         total += *r;
       };
 
-      (step(emit_token<PF, Is>(sink, tup)), ...);
+      (step(emit_token_buffered<PF, Is>(bw, tup)), ...);
 
       if (!ok_all) return std::unexpected(first_err);
       return ok(total);
@@ -304,6 +417,15 @@ export namespace out {
   // Note: ANSI tokens are handled via overloads in out.ansi.
   // Non-ANSI sinks get silent no-op behavior by default.
   inline constexpr std::size_t pad_chunk_size = 32;
+#ifndef OUT_WRITE_BUFFER_SIZE
+#define OUT_WRITE_BUFFER_SIZE 64
+#endif
+
+#if defined(OUT_UNROLL_TOKENS)
+#ifndef OUT_UNROLL_TOKENS_MAX
+#define OUT_UNROLL_TOKENS_MAX 32
+#endif
+#endif
   template <class UInt>
   inline result<std::size_t> write_uint_base(auto& sink, UInt v, unsigned base, fmt_spec spec) noexcept {
     char buf[80]; // enough for 64-bit in binary? 64 + maybe. binary needs 64, so enlarge if you enable b.
@@ -682,7 +804,7 @@ namespace detail {
    *    OUT_UNROLL_TOKENS 开关启用全展开（更极致）
    */
   // TODO: 不支持的类型尽量“编译期报错”，并给出扩展点范式，现在默认是返回 invalid_format
-  template <fixed_string Fmt, Sink S, class... Args>
+  template <fixed_string Fmt, Sink S, bool FinalFlush = true, class... Args>
   inline result<std::size_t> vprint(S& sink, Args&&... args) noexcept {
     constexpr auto& pf = detail::parsed_v<Fmt>;
 #if defined(OUT_ENABLE_FLOAT)
@@ -706,41 +828,113 @@ namespace detail {
     // 参数打包成 tuple 方便按索引取
     auto tup = std::forward_as_tuple(std::forward<Args>(args)...);
 
+    if constexpr (detail::is_buffered_writer_v<S>) {
+      std::size_t total = 0;
+
 #if defined(OUT_UNROLL_TOKENS)
-#ifndef OUT_UNROLL_TOKENS_MAX
-#define OUT_UNROLL_TOKENS_MAX 32
+      if constexpr (pf.toks.size() <= OUT_UNROLL_TOKENS_MAX) {
+        auto r = detail::unroll_tokens_seq<detail::parsed_v<Fmt>>(
+          sink, tup, std::make_index_sequence<pf.toks.size()>{});
+        if (!r) return std::unexpected(r.error());
+        total += *r;
+      } else {
+        for (std::size_t i = 0; i < pf.toks.size(); ++i) {
+          const auto& tk = pf.toks[i];
+          if (tk.kind == token_kind::lit) {
+            auto sv = pf.text.substr(tk.pos, tk.len);
+            auto r = sink.append(sv);
+            if (!r) return std::unexpected(r.error());
+            total += *r;
+          } else {
+            // ?????????
+            auto idx = tk.arg_index;
+            result<std::size_t> r = std::unexpected(errc::invalid_format);
+
+            // ????? lambda + index_sequence ? compile-time ??
+            [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+              ((idx == Is ? r = write_one(sink, std::get<Is>(tup), tk.spec) : r), ...);
+            }(std::make_index_sequence<sizeof...(Args)>{});
+
+            if (!r) return std::unexpected(r.error());
+            total += *r;
+          }
+        }
+      }
+#else
+      for (std::size_t i = 0; i < pf.toks.size(); ++i) {
+        const auto& tk = pf.toks[i];
+        if (tk.kind == token_kind::lit) {
+          auto sv = pf.text.substr(tk.pos, tk.len);
+          auto r = sink.append(sv);
+          if (!r) return std::unexpected(r.error());
+          total += *r;
+        } else {
+          // ?????????
+          auto idx = tk.arg_index;
+          result<std::size_t> r = std::unexpected(errc::invalid_format);
+
+          // ????? lambda + index_sequence ? compile-time ??
+          [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+            ((idx == Is ? r = write_one(sink, std::get<Is>(tup), tk.spec) : r), ...);
+          }(std::make_index_sequence<sizeof...(Args)>{});
+
+          if (!r) return std::unexpected(r.error());
+          total += *r;
+        }
+      }
 #endif
-    if constexpr (pf.toks.size() <= OUT_UNROLL_TOKENS_MAX) {
-      return detail::unroll_tokens_seq<detail::parsed_v<Fmt>>(
-        sink, tup, std::make_index_sequence<pf.toks.size()>{});
+      if constexpr (FinalFlush) {
+        auto rf = sink.flush();
+        if (!rf) return std::unexpected(rf.error());
+        total += *rf;
+      }
+      return ok(total);
     } else {
+#if defined(OUT_UNROLL_TOKENS)
+    if constexpr (pf.toks.size() <= OUT_UNROLL_TOKENS_MAX) {
+      detail::buffered_writer<S, OUT_WRITE_BUFFER_SIZE> bw{sink};
+      auto r = detail::unroll_tokens_seq<detail::parsed_v<Fmt>>(
+        bw, tup, std::make_index_sequence<pf.toks.size()>{});
+      if (!r) return std::unexpected(r.error());
+      std::size_t total = *r;
+      if constexpr (FinalFlush) {
+        auto rf = bw.flush();
+        if (!rf) return std::unexpected(rf.error());
+        total += *rf;
+      }
+      return ok(total);
+    }
 #endif
+    detail::buffered_writer<S, OUT_WRITE_BUFFER_SIZE> bw{sink};
     std::size_t total = 0;
     for (std::size_t i = 0; i < pf.toks.size(); ++i) {
       const auto& tk = pf.toks[i];
       if (tk.kind == token_kind::lit) {
         auto sv = pf.text.substr(tk.pos, tk.len);
-        auto r = write(sink, sv);
+        auto r = bw.append(sv);
         if (!r) return std::unexpected(r.error());
         total += *r;
       } else {
-        // 按索引取参数并写出
+        // ?????????
         auto idx = tk.arg_index;
         result<std::size_t> r = std::unexpected(errc::invalid_format);
 
-        // 小技巧：用 lambda + index_sequence 做 compile-time 分发
+        // ????? lambda + index_sequence ? compile-time ??
         [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-          ((idx == Is ? r = write_one(sink, std::get<Is>(tup), tk.spec) : r), ...);
+          ((idx == Is ? r = write_one(bw, std::get<Is>(tup), tk.spec) : r), ...);
         }(std::make_index_sequence<sizeof...(Args)>{});
 
         if (!r) return std::unexpected(r.error());
         total += *r;
       }
     }
-    return ok(total);
-#if defined(OUT_UNROLL_TOKENS)
+    if constexpr (FinalFlush) {
+      auto rf = bw.flush();
+      if (!rf) return std::unexpected(rf.error());
+      total += *rf;
     }
-#endif
+    return ok(total);
+  }
   }
 
 }

@@ -64,20 +64,19 @@ export namespace out {
     struct dev_sink {
         std::array<char, N> buf{};
         std::size_t pos = 0;
-        std::size_t write_calls = 0;
+        std::size_t bytes_calls = 0;
         std::size_t ansi_calls = 0;
         std::size_t flush_calls = 0;
         std::size_t bytes_total = 0;
         errc last_err = errc::ok;
 
         result<std::size_t> write(bytes b) noexcept {
-            ++write_calls;
+            ++bytes_calls;
             return write_bytes(b);
         }
 
         result<std::size_t> write_ansi(std::string_view sv) noexcept {
             ++ansi_calls;
-            ++write_calls;
             auto b = bytes{reinterpret_cast<const std::byte*>(sv.data()), sv.size()};
             return write_bytes(b);
         }
@@ -89,8 +88,10 @@ export namespace out {
 
         std::string_view view() const noexcept { return {buf.data(), pos}; }
         void clear() noexcept { pos = 0; }
+        void reset() noexcept { clear(); reset_metrics(); }
+        std::size_t write_calls_total() const noexcept { return bytes_calls + ansi_calls; }
         void reset_metrics() noexcept {
-            write_calls = 0;
+            bytes_calls = 0;
             ansi_calls = 0;
             flush_calls = 0;
             bytes_total = 0;
