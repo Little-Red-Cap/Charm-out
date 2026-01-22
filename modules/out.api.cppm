@@ -23,6 +23,9 @@ export namespace out {
     constexpr decltype(auto) eval(T&& v) { return std::forward<T>(v); }
 
     template <class F>
+    constexpr decltype(auto) eval(lazy_t<F>& lz) { return lz.f(); }
+
+    template <class F>
     constexpr decltype(auto) eval(lazy_t<F>&& lz) { return lz.f(); }
 
     // ✅ 统一入口：带 level + domain
