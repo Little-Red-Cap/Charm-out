@@ -228,7 +228,7 @@ export namespace out {
       std::size_t ansi_pos = 0;
 
       result<std::size_t> flush_ansi() noexcept {
-        if constexpr (ansi_is_bytes_v<S>) {
+        if constexpr (ansi_is_bytes_final_v<S>) {
           return ok<std::size_t>(0u);
         }
         if constexpr (requires(S& s, std::string_view v) { s.write_ansi(v); }) {
@@ -261,7 +261,7 @@ export namespace out {
       }
 
       result<std::size_t> append(std::string_view sv) noexcept {
-        if constexpr (!ansi_is_bytes_v<S>) {
+        if constexpr (!ansi_is_bytes_final_v<S>) {
           auto ra = flush_ansi();
           if (!ra) return std::unexpected(ra.error());
         }
@@ -288,7 +288,7 @@ export namespace out {
       template <class U = S>
       requires requires(U& s, std::string_view v) { s.write_ansi(v); }
       result<std::size_t> write_ansi(std::string_view sv) noexcept {
-        if constexpr (ansi_is_bytes_v<S>) {
+        if constexpr (ansi_is_bytes_final_v<S>) {
           return append(sv);
         }
         auto rb = flush_bytes();
