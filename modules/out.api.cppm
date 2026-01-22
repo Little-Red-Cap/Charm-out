@@ -31,6 +31,9 @@ export namespace out {
     constexpr decltype(auto) eval(lazy_t<F>& lz) { return lz.f(); }
 
     template <class F>
+    constexpr decltype(auto) eval(const lazy_t<F>& lz) { return lz.f(); }
+
+    template <class F>
     constexpr decltype(auto) eval(lazy_t<F>&& lz) { return lz.f(); }
 
     // ✅ 统一入口：带 level + domain
@@ -102,7 +105,7 @@ export namespace out {
         constexpr S* base_ptr(ansi::ansi_sink_ref<S, Enabled>& s) noexcept { return s.base; }
     }
 
-    enum class newline : std::uint8_t { lf, crlf };
+    enum class newline : std::uint8_t { none, lf, crlf };
 
     struct style_cmd {
         enum class kind : std::uint8_t { seq, fg, bg };
@@ -117,10 +120,10 @@ export namespace out {
     constexpr style_cmd make_style(italic_t) noexcept { return {style_cmd::kind::seq, "\x1b[3m", 0}; }
     constexpr style_cmd make_style(underline_t) noexcept { return {style_cmd::kind::seq, "\x1b[4m", 0}; }
     constexpr style_cmd make_style(ansi::fg_t v) noexcept {
-        return {style_cmd::kind::fg, {}, ansi::detail::fg_code(v.c)};
+        return {style_cmd::kind::fg, {}, ansi::fg_code(v.c)};
     }
     constexpr style_cmd make_style(ansi::bg_t v) noexcept {
-        return {style_cmd::kind::bg, {}, ansi::detail::bg_code(v.c)};
+        return {style_cmd::kind::bg, {}, ansi::bg_code(v.c)};
     }
 
     template <level L, class Domain, class Sink>
@@ -193,11 +196,11 @@ export namespace out {
 
         template <class S>
         inline result<std::size_t> write_style(S& s, const style_cmd& cmd) noexcept {
-            if constexpr (ansi::detail::AnsiSink<S>) {
+            if constexpr (ansi::AnsiSink<S>) {
                 if (cmd.k == style_cmd::kind::seq) {
                     return s.write_ansi(cmd.seq);
                 }
-                return ansi::detail::write_code(s, cmd.code);
+                return ansi::write_ansi_code(s, cmd.code);
             } else {
                 return ok<std::size_t>(0u);
             }
@@ -231,10 +234,12 @@ export namespace out {
                 }
 
                 if constexpr (WithNewline) {
-                    std::string_view nl_sv = (nl == newline::crlf) ? "\r\n" : "\n";
-                    auto rn = write(sink, nl_sv);
-                    if (!rn) return std::unexpected(rn.error());
-                    total += *rn;
+                    if (nl != newline::none) {
+                        std::string_view nl_sv = (nl == newline::crlf) ? "\r\n" : "\n";
+                        auto rn = write(sink, nl_sv);
+                        if (!rn) return std::unexpected(rn.error());
+                        total += *rn;
+                    }
                 }
 
                 return ok(total);
@@ -253,11 +258,7 @@ export namespace out {
 
     template <level L, class Domain = default_domain, class S>
     inline auto log(S& s) noexcept {
-        if constexpr (ansi::detail::AnsiSink<S>) {
-            return logger<L, Domain, S>{s};
-        } else {
-            return logger<L, Domain, detail::sink_ref<S>>{detail::sink_ref<S>{&s}};
-        }
+        return logger<L, Domain, detail::sink_ref<S>>{detail::sink_ref<S>{&s}};
     }
 
 }
