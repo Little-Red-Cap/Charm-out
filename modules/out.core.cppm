@@ -4,6 +4,8 @@ module;
 #include <expected>
 export module out.core;
 
+// out.core intentionally contains only the minimal, cross-module primitives.
+// Do NOT turn this into a general utilities header.
 
 export namespace out {
 
