@@ -24,7 +24,7 @@ export namespace out {
 }
 
 export namespace out::ansi {
-    // 颜色/指令 token：依然是“值类型”，可被 format/print 拼接
+    // Color/control tokens are values and can be composed via format/print.
     enum class color : std::uint8_t { default_, black, red, green, yellow, blue, magenta, cyan, white };
 
     inline constexpr reset_t reset{};
@@ -38,17 +38,22 @@ export namespace out::ansi {
     constexpr fg_t fg(color c) noexcept { return {c}; }
     constexpr bg_t bg(color c) noexcept { return {c}; }
 
-    // 注入能力：ansi_sink_ref —— 不复制 Base，只持有指针（最轻）
-    // Enabled 为 false 时，所有 ANSI token 写入直接编译期变成 0（无 runtime 分支）
+    // Capability wrapper: ansi_sink_ref holds a pointer and does not copy Base.
+    // When Enabled is false, ANSI writes compile away to zero (no runtime branch).
     template <class Base, bool Enabled = true>
     struct ansi_sink_ref {
         Base* base{};
 
-        // 让它本身也满足 Sink：转发普通写入
+        // Forward regular writes so the wrapper still satisfies Sink.
         result<std::size_t> write(bytes b) noexcept { return base->write(b); }
+        result<std::size_t> write(bytes b) const noexcept { return base->write(b); }
 
-        // ANSI 专用写入：能力点（只有 wrapper 有）
+        // ANSI write capability (only available on this wrapper).
         result<std::size_t> write_ansi(std::string_view sv) noexcept {
+            if constexpr (Enabled) return out::write(*base, sv);
+            else return out::ok<std::size_t>(0u);
+        }
+        result<std::size_t> write_ansi(std::string_view sv) const noexcept {
             if constexpr (Enabled) return out::write(*base, sv);
             else return out::ok<std::size_t>(0u);
         }
@@ -57,23 +62,23 @@ export namespace out::ansi {
     template <class S>
     using sink_ref_t = ansi_sink_ref<std::remove_reference_t<S>>;
 
-    // 语法糖：ansi(sink) => 注入 ANSI 能力（默认启用）
+    // Sugar: ansi(sink) enables ANSI output by default.
     template <class S>
     constexpr auto enable(S& s) noexcept -> ansi_sink_ref<S, true> { return { &s }; }
 
-    // 语法糖：ansi<false>(sink) => 注入但禁用 ANSI（编译期静默）
+    // Sugar: ansi<false>(sink) disables ANSI output (compile-time no-op).
     template <bool Enabled, class S>
     constexpr auto with(S& s) noexcept -> ansi_sink_ref<S, Enabled> { return { &s }; }
 
-    // 仅内部使用的实现细节
+    // Internal helpers.
     namespace detail {
-        // 用 concept 限定：只有带 write_ansi 的 sink 才吃 ANSI token
+        // Concept: only sinks with write_ansi can consume ANSI tokens.
         template <class S>
         concept AnsiSink = requires(S& s, std::string_view sv) {
             { s.write_ansi(sv) } -> std::same_as<result<std::size_t>>;
         };
 
-        // 生成序列：完全无堆，单次写入完整 ESC[...]m
+        // Build ESC[...]m code without heap allocation.
         constexpr int fg_code(color c) noexcept {
             switch (c) {
             case color::black: return 30;
@@ -117,7 +122,7 @@ export namespace out::ansi {
         return detail::write_code(s, code);
     }
 
-    // write_one 仅对具备 write_ansi 的 sink 生效
+    // write_one only applies to sinks that support write_ansi.
     template <AnsiSink S>
     inline result<std::size_t> write_one(S& s, reset_t, fmt_spec) noexcept { return s.write_ansi("\x1b[0m"); }
 
@@ -173,7 +178,7 @@ export namespace out {
     inline result<std::size_t> write_one(S&, ansi::bg_t, fmt_spec) noexcept { return ok<std::size_t>(0u); }
 }
 
-// ===== 语法糖：把常用符号再导出到 out 命名空间 =====
+// ===== Sugar: re-export common ANSI tokens into out namespace =====
 export namespace out {
     using ansi::color;
     using ansi::reset;
@@ -187,6 +192,6 @@ export namespace out {
     template <bool Enabled = true, class S>
     constexpr auto ansi_with(S& s) noexcept { return ansi::with<Enabled>(s); }
 
-    constexpr ansi::fg_t operator!(color c) noexcept { return {c}; }  // !color::red => 前景色
-    constexpr ansi::bg_t operator~(color c) noexcept { return {c}; }  // ~color::red => 背景色
+    constexpr ansi::fg_t operator!(color c) noexcept { return {c}; }  // !color::red => foreground
+    constexpr ansi::bg_t operator~(color c) noexcept { return {c}; }  // ~color::red => background
 }
