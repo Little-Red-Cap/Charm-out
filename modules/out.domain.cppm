@@ -1,5 +1,6 @@
 module;
 #include <cstdint>
+#include <string_view>
 export module out.domain;
 
 
@@ -35,5 +36,9 @@ export namespace out {
 
     // 用法示例：
     // template <> inline constexpr bool domain_enabled<my_module> = false;
+
+    // 可选域名：为空时不输出
+    template <class Domain>
+    inline constexpr std::string_view domain_name{};
 
 }
