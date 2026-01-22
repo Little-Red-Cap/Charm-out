@@ -255,6 +255,8 @@ export namespace out {
   }
 
   // --------- 数字格式化：无堆、无异常 ----------
+  // TODO: move this to a shared config point (or allow macro override)
+  inline constexpr std::size_t pad_chunk_size = 32;
   template <class UInt>
   inline result<std::size_t> write_uint_base(auto& sink, UInt v, unsigned base, fmt_spec spec) noexcept {
     char buf[80]; // enough for 64-bit in binary? 64 + maybe. binary needs 64, so enlarge if you enable b.
@@ -297,18 +299,18 @@ export namespace out {
     std::size_t len = static_cast<std::size_t>(last - first);
     std::size_t total = 0;
 
-    // padding
-    /* TODO: padding 现在是“每个 pad 写一次”，可以改成“块写”
-    * 改法（不破坏零堆）：用一个小栈缓冲（例如 16/32 字节）填满空格或 0，然后循环块写，写满为止。
-    * 这往往能显著减少 sink.write() 调用次数，且代码体积也可控。
-     */
+    // padding (block write to reduce sink.write calls)
     if (spec.width > len) {
       std::size_t pad = spec.width - len;
       const char ch = spec.zero_pad ? '0' : ' ';
-      for (std::size_t i = 0; i < pad; ++i) {
-        auto r = write(sink, std::string_view{&ch, 1});
+      char pad_buf[pad_chunk_size];
+      for (auto& c : pad_buf) c = ch;
+      while (pad != 0) {
+        const std::size_t n = (pad > sizeof(pad_buf)) ? sizeof(pad_buf) : pad;
+        auto r = write(sink, std::string_view{pad_buf, n});
         if (!r) return std::unexpected(r.error());
         total += *r;
+        pad -= n;
       }
     }
 
@@ -353,10 +355,14 @@ export namespace out {
     if (spec.width > len) {
       std::size_t pad = spec.width - len;
       const char ch = spec.zero_pad ? '0' : ' ';
-      for (std::size_t i = 0; i < pad; ++i) {
-        auto r = write(sink, std::string_view{&ch, 1});
+      char pad_buf[pad_chunk_size];
+      for (auto& c : pad_buf) c = ch;
+      while (pad != 0) {
+        const std::size_t n = (pad > sizeof(pad_buf)) ? sizeof(pad_buf) : pad;
+        auto r = write(sink, std::string_view{pad_buf, n});
         if (!r) return std::unexpected(r.error());
         total += *r;
+        pad -= n;
       }
     }
 
@@ -380,10 +386,14 @@ namespace detail {
   template <class S>
   inline result<std::size_t> write_pad(S& sink, char ch, std::size_t n) noexcept {
     std::size_t total = 0;
-    for (std::size_t i = 0; i < n; ++i) {
-      auto r = write(sink, std::string_view{&ch, 1});
+    char pad_buf[pad_chunk_size];
+    for (auto& c : pad_buf) c = ch;
+    while (n != 0) {
+      const std::size_t chunk = (n > sizeof(pad_buf)) ? sizeof(pad_buf) : n;
+      auto r = write(sink, std::string_view{pad_buf, chunk});
       if (!r) return std::unexpected(r.error());
       total += *r;
+      n -= chunk;
     }
     return ok(total);
   }
