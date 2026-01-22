@@ -215,6 +215,9 @@ export namespace out {
 
   namespace detail {
 
+    template <fixed_string Fmt>
+    inline constexpr auto parsed_v = parse_format<Fmt>();
+
     template <auto& PF, std::size_t I, class S, class Tup>
     inline result<std::size_t> emit_token(S& sink, Tup& tup) noexcept {
       constexpr token tk = PF.toks[I];
@@ -228,24 +231,23 @@ export namespace out {
       }
     }
 
-    template <auto& PF, std::size_t I, std::size_t N>
-    struct unroll_tokens {
-      template <class S, class Tup>
-      static result<std::size_t> run(S& sink, Tup& tup, std::size_t total) noexcept {
-        auto r = emit_token<PF, I>(sink, tup);
-        if (!r) return std::unexpected(r.error());
-        total += *r;
-        return unroll_tokens<PF, I + 1, N>::run(sink, tup, total);
-      }
-    };
+    template <auto& PF, class S, class Tup, std::size_t... Is>
+    inline result<std::size_t> unroll_tokens_seq(
+        S& sink, Tup& tup, std::index_sequence<Is...>) noexcept {
+      std::size_t total = 0;
+      errc first_err = errc::ok;
+      bool ok_all = true;
 
-    template <auto& PF, std::size_t N>
-    struct unroll_tokens<PF, N, N> {
-      template <class S, class Tup>
-      static result<std::size_t> run(S&, Tup&, std::size_t total) noexcept {
-        return ok(total);
-      }
-    };
+      auto step = [&](auto r) {
+        if (!r) { ok_all = false; first_err = r.error(); return; }
+        total += *r;
+      };
+
+      (step(emit_token<PF, Is>(sink, tup)), ...);
+
+      if (!ok_all) return std::unexpected(first_err);
+      return ok(total);
+    }
 
   } // namespace detail
 
@@ -682,7 +684,7 @@ namespace detail {
   // TODO: 不支持的类型尽量“编译期报错”，并给出扩展点范式，现在默认是返回 invalid_format
   template <fixed_string Fmt, Sink S, class... Args>
   inline result<std::size_t> vprint(S& sink, Args&&... args) noexcept {
-    constexpr auto pf = parse_format<Fmt>();
+    constexpr auto& pf = detail::parsed_v<Fmt>;
 #if defined(OUT_ENABLE_FLOAT)
     static_assert(!needs_float_non_fixed(pf),
       "MCU float backend only supports fixed format {:f}. "
@@ -705,8 +707,12 @@ namespace detail {
     auto tup = std::forward_as_tuple(std::forward<Args>(args)...);
 
 #if defined(OUT_UNROLL_TOKENS)
-    if constexpr (pf.toks.size() <= 32) {
-      return detail::unroll_tokens<pf, 0, pf.toks.size()>::run(sink, tup, 0u);
+#ifndef OUT_UNROLL_TOKENS_MAX
+#define OUT_UNROLL_TOKENS_MAX 32
+#endif
+    if constexpr (pf.toks.size() <= OUT_UNROLL_TOKENS_MAX) {
+      return detail::unroll_tokens_seq<detail::parsed_v<Fmt>>(
+        sink, tup, std::make_index_sequence<pf.toks.size()>{});
     } else {
 #endif
     std::size_t total = 0;
