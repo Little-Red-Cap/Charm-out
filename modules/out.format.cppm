@@ -255,7 +255,8 @@ export namespace out {
   }
 
   // --------- 数字格式化：无堆、无异常 ----------
-  // TODO: move this to a shared config point (or allow macro override)
+  // Note: ANSI tokens are handled via overloads in out.ansi.
+  // Non-ANSI sinks get silent no-op behavior by default.
   inline constexpr std::size_t pad_chunk_size = 32;
   template <class UInt>
   inline result<std::size_t> write_uint_base(auto& sink, UInt v, unsigned base, fmt_spec spec) noexcept {
