@@ -91,7 +91,6 @@ export namespace out {
         template <class S>
         struct sink_ref {
             S* base{};
-            result<std::size_t> write(bytes b) noexcept { return base->write(b); }
             result<std::size_t> write(bytes b) const noexcept { return base->write(b); }
         };
 
