@@ -75,4 +75,13 @@ export namespace out {
     // Trait: whether ANSI sequences can be treated as plain bytes for a sink.
     template <class S>
     inline constexpr bool ansi_is_bytes_v = false;
+
+    // Build-time override for ANSI-as-bytes behavior.
+    template <class S>
+    inline constexpr bool ansi_is_bytes_final_v =
+#if defined(OUT_ANSI_IS_BYTES)
+        (OUT_ANSI_IS_BYTES != 0);
+#else
+        ansi_is_bytes_v<S>;
+#endif
 }
