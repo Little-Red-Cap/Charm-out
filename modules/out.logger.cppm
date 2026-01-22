@@ -41,6 +41,7 @@ export namespace out {
         error_policy::ignore;
 #endif
 
+    // error_hook is intended to be set during initialization only (not thread-safe).
     inline void (*error_hook)(errc) = nullptr;
 
     enum class newline : std::uint8_t { none, lf, crlf };
@@ -108,9 +109,11 @@ export namespace out {
             }
         };
 
+#if defined(OUT_DEV)
         static_assert(ansi::AnsiSink<ansi::ansi_sink_ref<port::console_sink, true>>);
         using ansi_ref = sink_ref<ansi::ansi_sink_ref<port::console_sink, true>>;
         static_assert(ansi::AnsiSink<ansi_ref>);
+#endif
 
         template <class S>
         constexpr S* base_ptr(S& s) noexcept { return std::addressof(s); }
