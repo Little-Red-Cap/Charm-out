@@ -35,6 +35,9 @@ export namespace out {
     bool upper = false;
   };
 
+  template <class T>
+  struct formatter;
+
   enum class token_kind : std::uint8_t { lit, arg };
 
   struct token {
@@ -587,8 +590,14 @@ namespace detail {
       if (base == 2) return std::unexpected(errc::invalid_format);
 #endif
       return write_uint_base(sink, uv, base, spec);
+    } else if constexpr (requires {
+      formatter<T>::write(sink, value, spec);
+    }) {
+      return formatter<T>::write(sink, value, spec);
     } else {
-      // 你可以在这里挂载自定义 formatter：formatter<T>::write(...)
+      static_assert(dependent_false_v<T>,
+        "Type is not formattable. "
+        "Provide formatter<T>::write(sink, value, spec).");
       return std::unexpected(errc::invalid_format);
     }
   }
