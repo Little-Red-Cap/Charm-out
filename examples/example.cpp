@@ -104,6 +104,8 @@ extern "C" void example()
     // Lazy evaluation: callable runs only when the level is enabled.
     // ------------------------------------------------------------
     out::trace<"Expensive: {}">(console, out::lazy([] { return 99; }));
+    auto lazy_v = out::lazy([] { return 123; });
+    out::trace<"Lazy lvalue: {}">(console, lazy_v);
 
     // ------------------------------------------------------------
     // Timestamp
