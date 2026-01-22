@@ -85,6 +85,8 @@ export namespace out {
         }
 
         result<std::size_t> flush() noexcept {
+            // Note: flush() only flushes the line buffer to the base sink.
+            // It does NOT call base.flush().
             if (pos == 0) return ok<std::size_t>(0u);
             auto b = bytes{reinterpret_cast<const std::byte*>(buf.data()), pos};
             auto r = base.write(b);
@@ -93,6 +95,7 @@ export namespace out {
         }
 
         ~line_buffered_sink() { (void)flush(); }
+        // Destructor flushes best-effort; errors are intentionally ignored.
     };
 
 }
