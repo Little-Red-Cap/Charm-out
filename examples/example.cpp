@@ -143,9 +143,11 @@ extern "C" void example()
     // ------------------------------------------------------------
     out::buffer_sink<256> cap;
     // Filtered out; nothing is written into cap buffer.
+    cap.clear();
     out::emit<out::level::info, noisy_domain, "[noisy] {}">(cap, "SHOULD NOT APPEAR");
     out::print<"{}">(console, cap.view());  // empty output
 
+    cap.clear();
     out::emit<out::level::info, network_domain,   "[net] {}">(cap, "Connected");
     out::print<"{}">(console, cap.view());
     // Domain name (opt-in prefix)
