@@ -43,21 +43,41 @@ export namespace out {
     inline result<std::size_t> error(S& s, Args&&... a) noexcept {
         return emit<level::error, default_domain, Fmt>(s, std::forward<Args>(a)...);
     }
+    template <fixed_string Fmt, class... Args>
+    inline result<std::size_t> error(Args&&... a) noexcept {
+        return error<Fmt>(port::default_console(), std::forward<Args>(a)...);
+    }
     template <fixed_string Fmt, Sink S, class... Args>
     inline result<std::size_t> warn(S& s, Args&&... a) noexcept {
         return emit<level::warn, default_domain, Fmt>(s, std::forward<Args>(a)...);
+    }
+    template <fixed_string Fmt, class... Args>
+    inline result<std::size_t> warn(Args&&... a) noexcept {
+        return warn<Fmt>(port::default_console(), std::forward<Args>(a)...);
     }
     template <fixed_string Fmt, Sink S, class... Args>
     inline result<std::size_t> info(S& s, Args&&... a) noexcept {
         return emit<level::info, default_domain, Fmt>(s, std::forward<Args>(a)...);
     }
+    template <fixed_string Fmt, class... Args>
+    inline result<std::size_t> info(Args&&... a) noexcept {
+        return info<Fmt>(port::default_console(), std::forward<Args>(a)...);
+    }
     template <fixed_string Fmt, Sink S, class... Args>
     inline result<std::size_t> debug(S& s, Args&&... a) noexcept {
         return emit<level::debug, default_domain, Fmt>(s, std::forward<Args>(a)...);
     }
+    template <fixed_string Fmt, class... Args>
+    inline result<std::size_t> debug(Args&&... a) noexcept {
+        return debug<Fmt>(port::default_console(), std::forward<Args>(a)...);
+    }
     template <fixed_string Fmt, Sink S, class... Args>
     inline result<std::size_t> trace(S& s, Args&&... a) noexcept {
         return emit<level::trace, default_domain, Fmt>(s, std::forward<Args>(a)...);
+    }
+    template <fixed_string Fmt, class... Args>
+    inline result<std::size_t> trace(Args&&... a) noexcept {
+        return trace<Fmt>(port::default_console(), std::forward<Args>(a)...);
     }
 
 }

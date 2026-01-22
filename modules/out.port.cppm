@@ -14,6 +14,9 @@ export namespace out::port {
         result<std::size_t> write(bytes b) noexcept;
     };
 
+    console_sink& default_console() noexcept;
+    void set_default_console(console_sink* p) noexcept;
+
     // 串口输出（STM32: handle = UART_HandleTypeDef*；PC: 可用作 stdout 模拟）
     struct uart_sink {
         void* handle{};

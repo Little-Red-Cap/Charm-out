@@ -7,6 +7,15 @@ import out.core;
 
 
 namespace out::port {
+    static console_sink* g_default_console = nullptr;
+
+    void set_default_console(console_sink* p) noexcept { g_default_console = p; }
+
+    console_sink& default_console() noexcept {
+        if (g_default_console) return *g_default_console;
+        static console_sink inst{};
+        return inst;
+    }
 
     result<std::size_t> console_sink::write(const bytes b) noexcept {
         auto n = std::fwrite(b.data(), 1, b.size(), stdout);
