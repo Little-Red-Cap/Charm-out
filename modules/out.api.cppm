@@ -1,4 +1,9 @@
 module;
+#include <array>
+#include <cstdint>
+#include <expected>
+#include <memory>
+#include <string_view>
 #include <utility>
 export module out.api;
 
@@ -78,6 +83,181 @@ export namespace out {
     template <fixed_string Fmt, class... Args>
     inline result<std::size_t> trace(Args&&... a) noexcept {
         return trace<Fmt>(port::default_console(), std::forward<Args>(a)...);
+    }
+
+    namespace detail {
+        template <class S>
+        struct sink_ref {
+            S* base{};
+            result<std::size_t> write(bytes b) noexcept { return base->write(b); }
+        };
+
+        template <class S>
+        constexpr S* base_ptr(S& s) noexcept { return std::addressof(s); }
+
+        template <class S>
+        constexpr S* base_ptr(sink_ref<S>& s) noexcept { return s.base; }
+
+        template <class S, bool Enabled>
+        constexpr S* base_ptr(ansi::ansi_sink_ref<S, Enabled>& s) noexcept { return s.base; }
+    }
+
+    enum class newline : std::uint8_t { lf, crlf };
+
+    struct style_cmd {
+        enum class kind : std::uint8_t { seq, fg, bg };
+        kind k{};
+        std::string_view seq{};
+        int code = 0;
+    };
+
+    constexpr style_cmd make_style(reset_t) noexcept { return {style_cmd::kind::seq, "\x1b[0m", 0}; }
+    constexpr style_cmd make_style(bold_t) noexcept { return {style_cmd::kind::seq, "\x1b[1m", 0}; }
+    constexpr style_cmd make_style(dim_t) noexcept { return {style_cmd::kind::seq, "\x1b[2m", 0}; }
+    constexpr style_cmd make_style(italic_t) noexcept { return {style_cmd::kind::seq, "\x1b[3m", 0}; }
+    constexpr style_cmd make_style(underline_t) noexcept { return {style_cmd::kind::seq, "\x1b[4m", 0}; }
+    constexpr style_cmd make_style(ansi::fg_t v) noexcept {
+        return {style_cmd::kind::fg, {}, ansi::detail::fg_code(v.c)};
+    }
+    constexpr style_cmd make_style(ansi::bg_t v) noexcept {
+        return {style_cmd::kind::bg, {}, ansi::detail::bg_code(v.c)};
+    }
+
+    template <level L, class Domain, class Sink>
+    struct logger {
+        Sink sink;
+        std::array<style_cmd, 8> styles{};
+        std::uint8_t style_count = 0;
+        bool auto_reset_enabled = true;
+        bool with_timestamp = false;
+        newline nl = newline::crlf;
+
+        explicit constexpr logger(Sink s) noexcept : sink(std::move(s)) {}
+
+        template <class NewSink>
+        constexpr auto with_sink(NewSink ns) const noexcept {
+            logger<L, Domain, NewSink> out{std::move(ns)};
+            out.styles = styles;
+            out.style_count = style_count;
+            out.auto_reset_enabled = auto_reset_enabled;
+            out.with_timestamp = with_timestamp;
+            out.nl = nl;
+            return out;
+        }
+
+        template <bool Enabled = true>
+        constexpr auto ansi() const noexcept {
+            auto* base = detail::base_ptr(sink);
+            using base_t = std::remove_reference_t<decltype(*base)>;
+            return with_sink(ansi::ansi_sink_ref<base_t, Enabled>{base});
+        }
+
+        template <class NewDomain>
+        constexpr auto domain() const noexcept {
+            logger<L, NewDomain, Sink> out{sink};
+            out.styles = styles;
+            out.style_count = style_count;
+            out.auto_reset_enabled = auto_reset_enabled;
+            out.with_timestamp = with_timestamp;
+            out.nl = nl;
+            return out;
+        }
+
+        constexpr logger& auto_reset(bool on) noexcept { auto_reset_enabled = on; return *this; }
+        constexpr logger& no_reset() noexcept { auto_reset_enabled = false; return *this; }
+        constexpr logger& reset_on() noexcept { auto_reset_enabled = true; return *this; }
+        constexpr logger& timestamp() noexcept { with_timestamp = true; return *this; }
+        constexpr logger& newline(newline n) noexcept { nl = n; return *this; }
+
+        template <class... Tokens>
+        constexpr logger& style(Tokens... tokens) noexcept {
+            (push_style(make_style(tokens)), ...);
+            return *this;
+        }
+
+        template <fixed_string Fmt, class... Args>
+        inline result<std::size_t> print(Args&&... args) noexcept {
+            return emit<false, Fmt>(std::forward<Args>(args)...);
+        }
+
+        template <fixed_string Fmt, class... Args>
+        inline result<std::size_t> println(Args&&... args) noexcept {
+            return emit<true, Fmt>(std::forward<Args>(args)...);
+        }
+
+    private:
+        constexpr void push_style(style_cmd cmd) noexcept {
+            if (style_count >= styles.size()) return;
+            styles[style_count++] = cmd;
+        }
+
+        template <class S>
+        inline result<std::size_t> write_style(S& s, const style_cmd& cmd) noexcept {
+            if constexpr (ansi::detail::AnsiSink<S>) {
+                if (cmd.k == style_cmd::kind::seq) {
+                    return s.write_ansi(cmd.seq);
+                }
+                return ansi::detail::write_code(s, cmd.code);
+            } else {
+                return ok<std::size_t>(0u);
+            }
+        }
+
+        template <bool WithNewline, fixed_string Fmt, class... Args>
+        inline result<std::size_t> emit(Args&&... args) noexcept {
+            if constexpr (build_level >= L && L != level::off && domain_enabled<Domain>) {
+                std::size_t total = 0;
+
+                if (with_timestamp) {
+                    auto rts = out::print<"[{}] ">(sink, port::now_ms());
+                    if (!rts) return std::unexpected(rts.error());
+                    total += *rts;
+                }
+
+                for (std::uint8_t i = 0; i < style_count; ++i) {
+                    auto rs = write_style(sink, styles[i]);
+                    if (!rs) return std::unexpected(rs.error());
+                    total += *rs;
+                }
+
+                auto r = vprint<Fmt>(sink, eval(std::forward<Args>(args))...);
+                if (!r) return std::unexpected(r.error());
+                total += *r;
+
+                if (auto_reset_enabled && style_count > 0) {
+                    auto rr = write_style(sink, make_style(reset_t{}));
+                    if (!rr) return std::unexpected(rr.error());
+                    total += *rr;
+                }
+
+                if constexpr (WithNewline) {
+                    std::string_view nl_sv = (nl == newline::crlf) ? "\r\n" : "\n";
+                    auto rn = write(sink, nl_sv);
+                    if (!rn) return std::unexpected(rn.error());
+                    total += *rn;
+                }
+
+                return ok(total);
+            } else {
+                return ok(0u);
+            }
+        }
+    };
+
+    template <level L, class Domain = default_domain>
+    inline auto log() noexcept {
+        return logger<L, Domain, detail::sink_ref<port::console_sink>>{
+            detail::sink_ref<port::console_sink>{&port::default_console()}
+        };
+    }
+
+    template <level L, class Domain = default_domain, class S>
+    inline auto log(S& s) noexcept {
+        if constexpr (ansi::detail::AnsiSink<S>) {
+            return logger<L, Domain, S>{s};
+        } else {
+            return logger<L, Domain, detail::sink_ref<S>>{detail::sink_ref<S>{&s}};
+        }
     }
 
 }
