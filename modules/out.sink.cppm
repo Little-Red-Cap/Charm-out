@@ -17,6 +17,11 @@ export namespace out {
         { s.write(b) } -> std::same_as<result<std::size_t>>;
     };
 
+    template <class S>
+    concept Flushable = requires(S& s) {
+        { s.flush() } -> std::same_as<result<std::size_t>>;
+    };
+
     // 便捷函数：从 string_view 写入
     template <Sink S>
     inline result<std::size_t> write(S& s, std::string_view sv) noexcept {
