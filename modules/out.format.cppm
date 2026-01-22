@@ -523,11 +523,6 @@ namespace detail {
 
   // 统一入口：按类型写一个参数
   // TODO: 编译期字符串拼接
-  /* TODO: ANSI token 的“默认无色/静默”行为需要补齐  （当前write_one 默认分支不识别的类型会返回 invalid_format）
-   * 补齐方式：给 reset/bold/fg/bg 这些 token 增加一个“非 AnsiSink 时的 no-op overload”，
-   * 返回 ok(0u)，并用 requires 做分派（AnsiSink 优先匹配）。
-   * 这样“默认无色”就成立，而且不会影响 Enabled=false 的编译期裁剪优势。
-   */
   template <class S, class T>
   inline result<std::size_t> write_one(S& sink, const T& value, fmt_spec spec) noexcept {
     if constexpr (std::is_same_v<T, char>) {
