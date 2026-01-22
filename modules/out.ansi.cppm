@@ -124,6 +124,8 @@ export namespace out::ansi {
 } // namespace out::ansi
 
 // Non-ANSI sinks: treat ANSI tokens as no-op (default "silent" behavior).
+// Note: keep these overloads here to avoid pulling ANSI types into out.format
+// and creating a module dependency cycle.
 export namespace out {
     template <class S>
     requires (!ansi::detail::AnsiSink<S>)
