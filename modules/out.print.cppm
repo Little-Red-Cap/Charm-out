@@ -1,37 +1,10 @@
-module;
-#include <expected>
+﻿module;
 export module out.print;
-import out.format;
-import out.sink;
-import out.core;
-import out.port;
+// Dependency contract (DO NOT VIOLATE)
+// Allowed out.* imports: out.api (compat shim)
+// Forbidden out.* imports: everything else
+// Rationale: backwards compatibility only; all behavior lives in logger.
+// If you need functionality from a higher layer, add an extension point in this layer instead.
 
-export namespace out {
-
-    // ----------------------------
-    // Checked APIs (result<T>)
-    // ----------------------------
-    template <fixed_string Fmt, Sink S, class... Args>
-    inline result<std::size_t> try_print(S& sink, Args&&... args) noexcept {
-        return vprint<Fmt>(sink, std::forward<Args>(args)...);
-    }
-
-    template <fixed_string Fmt, class... Args>
-    inline result<std::size_t> try_print(Args&&... args) noexcept {
-        return try_print<Fmt>(port::default_console(), std::forward<Args>(args)...);
-    }
-
-    // ----------------------------
-    // Fire-and-forget APIs (void)
-    // ----------------------------
-    template <fixed_string Fmt, Sink S, class... Args>
-    inline void print(S& sink, Args&&... args) noexcept {
-        out::discard(try_print<Fmt>(sink, std::forward<Args>(args)...));
-    }
-
-    template <fixed_string Fmt, class... Args>
-    inline void print(Args&&... args) noexcept {
-        out::discard(try_print<Fmt>(std::forward<Args>(args)...));
-    }
-
-}
+// Compatibility shim: prefer importing out.api directly.
+export import out.api;

@@ -1,378 +1,30 @@
-module;
-#include <array>
+﻿module;
 #include <cstdint>
 #include <expected>
 #include <string_view>
 #include <utility>
 export module out.api;
+// Dependency contract (DO NOT VIOLATE)
+// Allowed out.* imports: (re-export only) out.core/out.sink/out.format/out.domain/out.port/out.ansi/out.logger
+// Forbidden out.* imports: (implementation should stay empty or thin wrappers only)
+// Rationale: public facade; must not reintroduce a second behavior path.
+// If you need functionality from a higher layer, add an extension point in this layer instead.
 
 export import out.ansi;
 export import out.core;
 export import out.domain;
 export import out.format;
-export import out.print;
+export import out.logger;
 export import out.port;
 export import out.sink;
 
+#if defined(OUT_ERROR_PROPAGATE)
+#define OUT_API_NODISCARD [[nodiscard]]
+#else
+#define OUT_API_NODISCARD
+#endif
+
 export namespace out {
-
-    // Lazy wrapper for deferred evaluation.
-    template <class F>
-    struct lazy_t { F f; };
-
-    template <class F>
-    constexpr auto lazy(F&& f) { return lazy_t<std::decay_t<F>>{std::forward<F>(f)}; }
-
-    template <class T>
-    constexpr decltype(auto) eval(T&& v) { return std::forward<T>(v); }
-
-    template <class F>
-    constexpr decltype(auto) eval(lazy_t<F>& lz) { return lz.f(); }
-
-    template <class F>
-    constexpr decltype(auto) eval(const lazy_t<F>& lz) { return lz.f(); }
-
-    template <class F>
-    constexpr decltype(auto) eval(lazy_t<F>&& lz) { return lz.f(); }
-
-    // Unified entry: level + domain.
-    // Note: lazy args are evaluated only in try_emit/try_emitln. Keep wrappers forwarding.
-    template <level L, class Domain, fixed_string Fmt, Sink S, class... Args>
-    inline result<std::size_t> try_emit(S& sink, Args&&... args) noexcept {
-        if constexpr (build_level >= L && L != level::off && domain_enabled<Domain>) {
-            return try_print<Fmt>(sink, eval(std::forward<Args>(args))...);
-        } else {
-            return ok(0u);
-        }
-    }
-
-    template <level L, class Domain, fixed_string Fmt, Sink S, class... Args>
-    inline result<std::size_t> try_emitln(S& sink, Args&&... args) noexcept {
-        if constexpr (build_level >= L && L != level::off && domain_enabled<Domain>) {
-            auto r = try_print<Fmt>(sink, eval(std::forward<Args>(args))...);
-            if (!r) return r;
-            auto rn = write(sink, "\r\n");
-            if (!rn) return std::unexpected(rn.error());
-            return ok(*r + *rn);
-        } else {
-            return ok(0u);
-        }
-    }
-
-    template <level L, class Domain, fixed_string Fmt, Sink S, class... Args>
-    inline void emit(S& sink, Args&&... args) noexcept {
-        out::discard(try_emitln<L, Domain, Fmt>(sink, std::forward<Args>(args)...));
-    }
-
-    // Convenience overloads: default_domain.
-    template <fixed_string Fmt, Sink S, class... Args>
-    inline result<std::size_t> try_error(S& s, Args&&... a) noexcept {
-        return try_emitln<level::error, default_domain, Fmt>(s, std::forward<Args>(a)...);
-    }
-    template <fixed_string Fmt, class... Args>
-    inline result<std::size_t> try_error(Args&&... a) noexcept {
-        return try_error<Fmt>(port::default_console(), std::forward<Args>(a)...);
-    }
-    template <fixed_string Fmt, Sink S, class... Args>
-    inline void error(S& s, Args&&... a) noexcept {
-        out::discard(try_error<Fmt>(s, std::forward<Args>(a)...));
-    }
-    template <fixed_string Fmt, class... Args>
-    inline void error(Args&&... a) noexcept {
-        out::discard(try_error<Fmt>(port::default_console(), std::forward<Args>(a)...));
-    }
-    template <fixed_string Fmt, Sink S, class... Args>
-    inline result<std::size_t> try_warn(S& s, Args&&... a) noexcept {
-        return try_emitln<level::warn, default_domain, Fmt>(s, std::forward<Args>(a)...);
-    }
-    template <fixed_string Fmt, class... Args>
-    inline result<std::size_t> try_warn(Args&&... a) noexcept {
-        return try_warn<Fmt>(port::default_console(), std::forward<Args>(a)...);
-    }
-    template <fixed_string Fmt, Sink S, class... Args>
-    inline void warn(S& s, Args&&... a) noexcept {
-        out::discard(try_warn<Fmt>(s, std::forward<Args>(a)...));
-    }
-    template <fixed_string Fmt, class... Args>
-    inline void warn(Args&&... a) noexcept {
-        out::discard(try_warn<Fmt>(port::default_console(), std::forward<Args>(a)...));
-    }
-    template <fixed_string Fmt, Sink S, class... Args>
-    inline result<std::size_t> try_info(S& s, Args&&... a) noexcept {
-        return try_emitln<level::info, default_domain, Fmt>(s, std::forward<Args>(a)...);
-    }
-    template <fixed_string Fmt, class... Args>
-    inline result<std::size_t> try_info(Args&&... a) noexcept {
-        return try_info<Fmt>(port::default_console(), std::forward<Args>(a)...);
-    }
-    template <fixed_string Fmt, Sink S, class... Args>
-    inline void info(S& s, Args&&... a) noexcept {
-        out::discard(try_info<Fmt>(s, std::forward<Args>(a)...));
-    }
-    template <fixed_string Fmt, class... Args>
-    inline void info(Args&&... a) noexcept {
-        out::discard(try_info<Fmt>(port::default_console(), std::forward<Args>(a)...));
-    }
-    template <fixed_string Fmt, Sink S, class... Args>
-    inline result<std::size_t> try_debug(S& s, Args&&... a) noexcept {
-        return try_emitln<level::debug, default_domain, Fmt>(s, std::forward<Args>(a)...);
-    }
-    template <fixed_string Fmt, class... Args>
-    inline result<std::size_t> try_debug(Args&&... a) noexcept {
-        return try_debug<Fmt>(port::default_console(), std::forward<Args>(a)...);
-    }
-    template <fixed_string Fmt, Sink S, class... Args>
-    inline void debug(S& s, Args&&... a) noexcept {
-        out::discard(try_debug<Fmt>(s, std::forward<Args>(a)...));
-    }
-    template <fixed_string Fmt, class... Args>
-    inline void debug(Args&&... a) noexcept {
-        out::discard(try_debug<Fmt>(port::default_console(), std::forward<Args>(a)...));
-    }
-    template <fixed_string Fmt, Sink S, class... Args>
-    inline result<std::size_t> try_trace(S& s, Args&&... a) noexcept {
-        return try_emitln<level::trace, default_domain, Fmt>(s, std::forward<Args>(a)...);
-    }
-    template <fixed_string Fmt, class... Args>
-    inline result<std::size_t> try_trace(Args&&... a) noexcept {
-        return try_trace<Fmt>(port::default_console(), std::forward<Args>(a)...);
-    }
-    template <fixed_string Fmt, Sink S, class... Args>
-    inline void trace(S& s, Args&&... a) noexcept {
-        out::discard(try_trace<Fmt>(s, std::forward<Args>(a)...));
-    }
-    template <fixed_string Fmt, class... Args>
-    inline void trace(Args&&... a) noexcept {
-        out::discard(try_trace<Fmt>(port::default_console(), std::forward<Args>(a)...));
-    }
-
-    namespace detail {
-        template <class S>
-        struct sink_ref {
-            S* base{};
-            result<std::size_t> write(bytes b) const noexcept { return base->write(b); }
-        };
-
-        template <class S>
-        constexpr S* base_ptr(S& s) noexcept { return std::addressof(s); }
-
-        template <class S>
-        constexpr S* base_ptr(sink_ref<S>& s) noexcept { return s.base; }
-
-        template <class S>
-        constexpr S* base_ptr(const sink_ref<S>& s) noexcept { return s.base; }
-
-        template <class S, bool Enabled>
-        constexpr S* base_ptr(ansi::ansi_sink_ref<S, Enabled>& s) noexcept { return s.base; }
-
-        template <class S, bool Enabled>
-        constexpr S* base_ptr(const ansi::ansi_sink_ref<S, Enabled>& s) noexcept { return s.base; }
-    }
-
-    enum class newline : std::uint8_t { none, lf, crlf };
-
-    struct style_cmd {
-        enum class kind : std::uint8_t { seq, fg, bg };
-        kind k{};
-        std::string_view seq{};
-        int code = 0;
-    };
-
-    constexpr style_cmd make_style(reset_t) noexcept { return {style_cmd::kind::seq, "\x1b[0m", 0}; }
-    constexpr style_cmd make_style(bold_t) noexcept { return {style_cmd::kind::seq, "\x1b[1m", 0}; }
-    constexpr style_cmd make_style(dim_t) noexcept { return {style_cmd::kind::seq, "\x1b[2m", 0}; }
-    constexpr style_cmd make_style(italic_t) noexcept { return {style_cmd::kind::seq, "\x1b[3m", 0}; }
-    constexpr style_cmd make_style(underline_t) noexcept { return {style_cmd::kind::seq, "\x1b[4m", 0}; }
-    constexpr style_cmd make_style(ansi::fg_t v) noexcept {
-        return {style_cmd::kind::fg, {}, ansi::fg_code(v.c)};
-    }
-    constexpr style_cmd make_style(ansi::bg_t v) noexcept {
-        return {style_cmd::kind::bg, {}, ansi::bg_code(v.c)};
-    }
-    template <class T>
-    constexpr style_cmd make_style(const T&) noexcept {
-        static_assert(out::dependent_false_v<T>, "unsupported style token");
-        return {};
-    }
-
-    template <level L, class Domain, class Sink>
-    struct logger {
-        Sink sink;
-        std::array<style_cmd, 8> styles{};
-        std::uint8_t style_count = 0;
-        bool auto_reset_enabled = true;
-        bool with_timestamp = false;
-        bool with_level = true;
-        bool with_domain = false;
-        newline nl = newline::crlf;
-
-        explicit constexpr logger(Sink s) noexcept : sink(std::move(s)) {}
-
-        template <class NewSink>
-        constexpr auto with_sink(NewSink ns) const noexcept {
-            logger<L, Domain, NewSink> out{std::move(ns)};
-            copy_opts_to(out);
-            return out;
-        }
-
-        template <bool Enabled = true>
-        constexpr auto ansi() const noexcept {
-            auto* base = detail::base_ptr(sink);
-            using base_t = std::remove_reference_t<decltype(*base)>;
-            return with_sink(ansi::ansi_sink_ref<base_t, Enabled>{base});
-        }
-
-        template <class NewDomain>
-        constexpr auto domain() const noexcept {
-            logger<L, NewDomain, Sink> out{sink};
-            copy_opts_to(out);
-            return out;
-        }
-
-        constexpr logger& auto_reset(bool on) noexcept { auto_reset_enabled = on; return *this; }
-        constexpr logger& no_reset() noexcept { auto_reset_enabled = false; return *this; }
-        constexpr logger& reset_on() noexcept { auto_reset_enabled = true; return *this; }
-        constexpr logger& timestamp() noexcept { with_timestamp = true; return *this; }
-        constexpr logger& level_prefix(bool on = true) noexcept { with_level = on; return *this; }
-        constexpr logger& domain_prefix(bool on = true) noexcept { with_domain = on; return *this; }
-        constexpr logger& set_newline(newline n) noexcept { nl = n; return *this; }
-
-        template <class... Tokens>
-        constexpr logger& style(Tokens&&... tokens) noexcept {
-            (push_style(make_style(std::forward<Tokens>(tokens))), ...);
-            return *this;
-        }
-
-        template <fixed_string Fmt, class... Args>
-        inline result<std::size_t> try_print(Args&&... args) noexcept {
-            return try_emit_impl<false, Fmt>(std::forward<Args>(args)...);
-        }
-
-        template <fixed_string Fmt, class... Args>
-        inline result<std::size_t> try_println(Args&&... args) noexcept {
-            return try_emit_impl<true, Fmt>(std::forward<Args>(args)...);
-        }
-
-        template <fixed_string Fmt, class... Args>
-        inline void print(Args&&... args) noexcept {
-            out::discard(try_print<Fmt>(std::forward<Args>(args)...));
-        }
-
-        template <fixed_string Fmt, class... Args>
-        inline void println(Args&&... args) noexcept {
-            out::discard(try_println<Fmt>(std::forward<Args>(args)...));
-        }
-
-    private:
-        template <class Other>
-        constexpr void copy_opts_to(Other& out) const noexcept {
-            out.styles = styles;
-            out.style_count = style_count;
-            out.auto_reset_enabled = auto_reset_enabled;
-            out.with_timestamp = with_timestamp;
-            out.with_level = with_level;
-            out.with_domain = with_domain;
-            out.nl = nl;
-        }
-
-        static constexpr char level_tag() noexcept {
-            if constexpr (L == level::error) return 'E';
-            else if constexpr (L == level::warn) return 'W';
-            else if constexpr (L == level::info) return 'I';
-            else if constexpr (L == level::debug) return 'D';
-            else if constexpr (L == level::trace) return 'T';
-            else return ' ';
-        }
-
-        constexpr void push_style(style_cmd cmd) noexcept {
-            if (style_count >= styles.size()) return;
-            styles[style_count++] = cmd;
-        }
-
-        template <class S>
-        inline result<std::size_t> write_style(S& s, const style_cmd& cmd) noexcept {
-            if constexpr (ansi::AnsiSink<S>) {
-                if (cmd.k == style_cmd::kind::seq) {
-                    return s.write_ansi(cmd.seq);
-                }
-                return ansi::write_ansi_code(s, cmd.code);
-            } else {
-                return ok<std::size_t>(0u);
-            }
-        }
-
-        template <bool WithNewline, fixed_string Fmt, class... Args>
-        inline result<std::size_t> try_emit_impl(Args&&... args) noexcept {
-            if constexpr (build_level >= L && L != level::off && domain_enabled<Domain>) {
-                std::size_t total = 0;
-
-                if (with_timestamp) {
-                    auto rts = out::try_print<"[{}] ">(sink, port::now_ms());
-                    if (!rts) return std::unexpected(rts.error());
-                    total += *rts;
-                }
-
-                if (with_level) {
-                    char buf[4] = {'[', level_tag(), ']', ' '};
-                    auto rp = write(sink, std::string_view{buf, sizeof(buf)});
-                    if (!rp) return std::unexpected(rp.error());
-                    total += *rp;
-                }
-
-                if (with_domain) {
-                    if constexpr (domain_name<Domain>.size() != 0) {
-                        auto r1 = write(sink, "[");
-                        if (!r1) return std::unexpected(r1.error());
-                        total += *r1;
-                        auto r2 = write(sink, domain_name<Domain>);
-                        if (!r2) return std::unexpected(r2.error());
-                        total += *r2;
-                        auto r3 = write(sink, "] ");
-                        if (!r3) return std::unexpected(r3.error());
-                        total += *r3;
-                    }
-                }
-
-                for (std::uint8_t i = 0; i < style_count; ++i) {
-                    auto rs = write_style(sink, styles[i]);
-                    if (!rs) return std::unexpected(rs.error());
-                    total += *rs;
-                }
-
-                auto r = vprint<Fmt>(sink, eval(std::forward<Args>(args))...);
-                if (!r) return std::unexpected(r.error());
-                total += *r;
-
-                if (auto_reset_enabled && style_count > 0) {
-                    auto rr = write_style(sink, make_style(reset_t{}));
-                    if (!rr) return std::unexpected(rr.error());
-                    total += *rr;
-                }
-
-                if constexpr (WithNewline) {
-                    if (nl != newline::none) {
-                        std::string_view nl_sv = (nl == newline::crlf) ? "\r\n" : "\n";
-                        auto rn = write(sink, nl_sv);
-                        if (!rn) return std::unexpected(rn.error());
-                        total += *rn;
-
-                        auto* base = detail::base_ptr(sink);
-                        using base_t = std::remove_reference_t<decltype(*base)>;
-                        if constexpr (Flushable<base_t>) {
-                            auto rf = base->flush();
-                            if (!rf) return std::unexpected(rf.error());
-                            total += *rf;
-                        }
-                    }
-                }
-
-                return ok(total);
-            } else {
-                return ok(0u);
-            }
-        }
-    };
-
     template <level L, class Domain = default_domain>
     inline auto log() noexcept {
         return logger<L, Domain, detail::sink_ref<port::console_sink>>{
@@ -385,6 +37,27 @@ export namespace out {
         return logger<L, Domain, detail::sink_ref<S>>{detail::sink_ref<S>{&s}};
     }
 
+    inline auto raw() noexcept {
+        auto out = logger<level::info, default_domain, detail::sink_ref<port::console_sink>, true>{
+            detail::sink_ref<port::console_sink>{&port::default_console()}
+        };
+        out.level_prefix(false);
+        out.domain_prefix(false);
+        out.no_flush();
+        return out;
+    }
+
+    template <class S>
+    inline auto raw(S& s) noexcept {
+        auto out = logger<level::info, default_domain, detail::sink_ref<S>, true>{
+            detail::sink_ref<S>{&s}
+        };
+        out.level_prefix(false);
+        out.domain_prefix(false);
+        out.no_flush();
+        return out;
+    }
+
     template <level L, class Domain = default_domain>
     inline auto logc() noexcept {
         return log<L, Domain>().template ansi<true>();
@@ -395,4 +68,176 @@ export namespace out {
         return log<L, Domain>(s).template ansi<true>();
     }
 
+    // Raw formatter entry (no prefixes).
+    template <fixed_string Fmt, Sink S, class... Args>
+    inline result<std::size_t> try_print(S& s, Args&&... a) noexcept {
+        return raw(s).template try_print<Fmt>(std::forward<Args>(a)...);
+    }
+
+    template <fixed_string Fmt, class... Args>
+    inline result<std::size_t> try_print(Args&&... a) noexcept {
+        return raw().template try_print<Fmt>(std::forward<Args>(a)...);
+    }
+
+    template <fixed_string Fmt, Sink S, class... Args>
+    inline result<std::size_t> try_println(S& s, Args&&... a) noexcept {
+        return raw(s).template try_println<Fmt>(std::forward<Args>(a)...);
+    }
+
+    template <fixed_string Fmt, class... Args>
+    inline result<std::size_t> try_println(Args&&... a) noexcept {
+        return raw().template try_println<Fmt>(std::forward<Args>(a)...);
+    }
+
+    template <fixed_string Fmt, Sink S, class... Args>
+    OUT_API_NODISCARD inline detail::public_return_t<std::size_t> print(S& s, Args&&... a) noexcept {
+        auto r = raw(s).template try_print<Fmt>(std::forward<Args>(a)...);
+        return detail::finalize(r);
+    }
+
+    template <fixed_string Fmt, class... Args>
+    OUT_API_NODISCARD inline detail::public_return_t<std::size_t> print(Args&&... a) noexcept {
+        auto r = raw().template try_print<Fmt>(std::forward<Args>(a)...);
+        return detail::finalize(r);
+    }
+
+    template <fixed_string Fmt, Sink S, class... Args>
+    OUT_API_NODISCARD inline detail::public_return_t<std::size_t> println(S& s, Args&&... a) noexcept {
+        auto r = raw(s).template try_println<Fmt>(std::forward<Args>(a)...);
+        return detail::finalize(r);
+    }
+
+    template <fixed_string Fmt, class... Args>
+    OUT_API_NODISCARD inline detail::public_return_t<std::size_t> println(Args&&... a) noexcept {
+        auto r = raw().template try_println<Fmt>(std::forward<Args>(a)...);
+        return detail::finalize(r);
+    }
+
+    // Unified entry: level + domain.
+    template <level L, class Domain, fixed_string Fmt, Sink S, class... Args>
+    inline result<std::size_t> try_emit(S& sink, Args&&... args) noexcept {
+        return log<L, Domain>(sink).template try_print<Fmt>(std::forward<Args>(args)...);
+    }
+
+    template <level L, class Domain, fixed_string Fmt, class... Args>
+    inline result<std::size_t> try_emit(Args&&... args) noexcept {
+        return log<L, Domain>().template try_print<Fmt>(std::forward<Args>(args)...);
+    }
+
+    template <level L, class Domain, fixed_string Fmt, Sink S, class... Args>
+    inline result<std::size_t> try_emitln(S& sink, Args&&... args) noexcept {
+        return log<L, Domain>(sink).template try_println<Fmt>(std::forward<Args>(args)...);
+    }
+
+    template <level L, class Domain, fixed_string Fmt, class... Args>
+    inline result<std::size_t> try_emitln(Args&&... args) noexcept {
+        return log<L, Domain>().template try_println<Fmt>(std::forward<Args>(args)...);
+    }
+
+    template <level L, class Domain, fixed_string Fmt, Sink S, class... Args>
+    OUT_API_NODISCARD inline detail::public_return_t<std::size_t> emit(S& sink, Args&&... args) noexcept {
+        auto r = log<L, Domain>(sink).template try_println<Fmt>(std::forward<Args>(args)...);
+        return detail::finalize(r);
+    }
+
+    template <level L, class Domain, fixed_string Fmt, class... Args>
+    OUT_API_NODISCARD inline detail::public_return_t<std::size_t> emit(Args&&... args) noexcept {
+        auto r = log<L, Domain>().template try_println<Fmt>(std::forward<Args>(args)...);
+        return detail::finalize(r);
+    }
+
+    // Convenience overloads: default_domain.
+    template <fixed_string Fmt, Sink S, class... Args>
+    inline result<std::size_t> try_error(S& s, Args&&... a) noexcept {
+        return log<level::error>(s).template try_println<Fmt>(std::forward<Args>(a)...);
+    }
+    template <fixed_string Fmt, class... Args>
+    inline result<std::size_t> try_error(Args&&... a) noexcept {
+        return log<level::error>().template try_println<Fmt>(std::forward<Args>(a)...);
+    }
+    template <fixed_string Fmt, Sink S, class... Args>
+    OUT_API_NODISCARD inline detail::public_return_t<std::size_t> error(S& s, Args&&... a) noexcept {
+        auto r = log<level::error>(s).template try_println<Fmt>(std::forward<Args>(a)...);
+        return detail::finalize(r);
+    }
+    template <fixed_string Fmt, class... Args>
+    OUT_API_NODISCARD inline detail::public_return_t<std::size_t> error(Args&&... a) noexcept {
+        auto r = log<level::error>().template try_println<Fmt>(std::forward<Args>(a)...);
+        return detail::finalize(r);
+    }
+    template <fixed_string Fmt, Sink S, class... Args>
+    inline result<std::size_t> try_warn(S& s, Args&&... a) noexcept {
+        return log<level::warn>(s).template try_println<Fmt>(std::forward<Args>(a)...);
+    }
+    template <fixed_string Fmt, class... Args>
+    inline result<std::size_t> try_warn(Args&&... a) noexcept {
+        return log<level::warn>().template try_println<Fmt>(std::forward<Args>(a)...);
+    }
+    template <fixed_string Fmt, Sink S, class... Args>
+    OUT_API_NODISCARD inline detail::public_return_t<std::size_t> warn(S& s, Args&&... a) noexcept {
+        auto r = log<level::warn>(s).template try_println<Fmt>(std::forward<Args>(a)...);
+        return detail::finalize(r);
+    }
+    template <fixed_string Fmt, class... Args>
+    OUT_API_NODISCARD inline detail::public_return_t<std::size_t> warn(Args&&... a) noexcept {
+        auto r = log<level::warn>().template try_println<Fmt>(std::forward<Args>(a)...);
+        return detail::finalize(r);
+    }
+    template <fixed_string Fmt, Sink S, class... Args>
+    inline result<std::size_t> try_info(S& s, Args&&... a) noexcept {
+        return log<level::info>(s).template try_println<Fmt>(std::forward<Args>(a)...);
+    }
+    template <fixed_string Fmt, class... Args>
+    inline result<std::size_t> try_info(Args&&... a) noexcept {
+        return log<level::info>().template try_println<Fmt>(std::forward<Args>(a)...);
+    }
+    template <fixed_string Fmt, Sink S, class... Args>
+    OUT_API_NODISCARD inline detail::public_return_t<std::size_t> info(S& s, Args&&... a) noexcept {
+        auto r = log<level::info>(s).template try_println<Fmt>(std::forward<Args>(a)...);
+        return detail::finalize(r);
+    }
+    template <fixed_string Fmt, class... Args>
+    OUT_API_NODISCARD inline detail::public_return_t<std::size_t> info(Args&&... a) noexcept {
+        auto r = log<level::info>().template try_println<Fmt>(std::forward<Args>(a)...);
+        return detail::finalize(r);
+    }
+    template <fixed_string Fmt, Sink S, class... Args>
+    inline result<std::size_t> try_debug(S& s, Args&&... a) noexcept {
+        return log<level::debug>(s).template try_println<Fmt>(std::forward<Args>(a)...);
+    }
+    template <fixed_string Fmt, class... Args>
+    inline result<std::size_t> try_debug(Args&&... a) noexcept {
+        return log<level::debug>().template try_println<Fmt>(std::forward<Args>(a)...);
+    }
+    template <fixed_string Fmt, Sink S, class... Args>
+    OUT_API_NODISCARD inline detail::public_return_t<std::size_t> debug(S& s, Args&&... a) noexcept {
+        auto r = log<level::debug>(s).template try_println<Fmt>(std::forward<Args>(a)...);
+        return detail::finalize(r);
+    }
+    template <fixed_string Fmt, class... Args>
+    OUT_API_NODISCARD inline detail::public_return_t<std::size_t> debug(Args&&... a) noexcept {
+        auto r = log<level::debug>().template try_println<Fmt>(std::forward<Args>(a)...);
+        return detail::finalize(r);
+    }
+    template <fixed_string Fmt, Sink S, class... Args>
+    inline result<std::size_t> try_trace(S& s, Args&&... a) noexcept {
+        return log<level::trace>(s).template try_println<Fmt>(std::forward<Args>(a)...);
+    }
+    template <fixed_string Fmt, class... Args>
+    inline result<std::size_t> try_trace(Args&&... a) noexcept {
+        return log<level::trace>().template try_println<Fmt>(std::forward<Args>(a)...);
+    }
+    template <fixed_string Fmt, Sink S, class... Args>
+    OUT_API_NODISCARD inline detail::public_return_t<std::size_t> trace(S& s, Args&&... a) noexcept {
+        auto r = log<level::trace>(s).template try_println<Fmt>(std::forward<Args>(a)...);
+        return detail::finalize(r);
+    }
+    template <fixed_string Fmt, class... Args>
+    OUT_API_NODISCARD inline detail::public_return_t<std::size_t> trace(Args&&... a) noexcept {
+        auto r = log<level::trace>().template try_println<Fmt>(std::forward<Args>(a)...);
+        return detail::finalize(r);
+    }
+
 }
+
+#undef OUT_API_NODISCARD

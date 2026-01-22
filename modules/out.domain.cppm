@@ -2,6 +2,11 @@ module;
 #include <cstdint>
 #include <string_view>
 export module out.domain;
+// Dependency contract (DO NOT VIOLATE)
+// Allowed out.* imports: (none)
+// Forbidden out.* imports: out.*
+// Rationale: compile-time gating knobs only (level/domain).
+// If you need functionality from a higher layer, add an extension point in this layer instead.
 
 
 export namespace out {

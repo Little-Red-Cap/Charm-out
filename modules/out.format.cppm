@@ -9,6 +9,11 @@ module;
 #include <type_traits>
 #include <bit>  // std::bit_cast 用于不引入 <cmath> 的情况下判断 NaN/Inf 与取绝对值。
 export module out.format;
+// Dependency contract (DO NOT VIOLATE)
+// Allowed out.* imports: out.core, out.sink
+// Forbidden out.* imports: out.ansi, out.logger, out.api, out.port, out.print, out.domain
+// Rationale: formatting core; must not depend on ANSI/logger/policy/ports.
+// If you need functionality from a higher layer, add an extension point in this layer instead.
 
 import out.core;
 import out.sink;
@@ -207,6 +212,42 @@ export namespace out {
     out.nargs = r.nargs;
     return out;
   }
+
+  namespace detail {
+
+    template <auto& PF, std::size_t I, class S, class Tup>
+    inline result<std::size_t> emit_token(S& sink, Tup& tup) noexcept {
+      constexpr token tk = PF.toks[I];
+
+      if constexpr (tk.kind == token_kind::lit) {
+        auto sv = PF.text.substr(tk.pos, tk.len);
+        return write(sink, sv);
+      } else {
+        constexpr std::size_t idx = static_cast<std::size_t>(tk.arg_index);
+        return write_one(sink, std::get<idx>(tup), tk.spec);
+      }
+    }
+
+    template <auto& PF, std::size_t I, std::size_t N>
+    struct unroll_tokens {
+      template <class S, class Tup>
+      static result<std::size_t> run(S& sink, Tup& tup, std::size_t total) noexcept {
+        auto r = emit_token<PF, I>(sink, tup);
+        if (!r) return std::unexpected(r.error());
+        total += *r;
+        return unroll_tokens<PF, I + 1, N>::run(sink, tup, total);
+      }
+    };
+
+    template <auto& PF, std::size_t N>
+    struct unroll_tokens<PF, N, N> {
+      template <class S, class Tup>
+      static result<std::size_t> run(S&, Tup&, std::size_t total) noexcept {
+        return ok(total);
+      }
+    };
+
+  } // namespace detail
 
 
 
@@ -663,6 +704,11 @@ namespace detail {
     // 参数打包成 tuple 方便按索引取
     auto tup = std::forward_as_tuple(std::forward<Args>(args)...);
 
+#if defined(OUT_UNROLL_TOKENS)
+    if constexpr (pf.toks.size() <= 32) {
+      return detail::unroll_tokens<pf, 0, pf.toks.size()>::run(sink, tup, 0u);
+    } else {
+#endif
     std::size_t total = 0;
     for (std::size_t i = 0; i < pf.toks.size(); ++i) {
       const auto& tk = pf.toks[i];
@@ -686,6 +732,9 @@ namespace detail {
       }
     }
     return ok(total);
+#if defined(OUT_UNROLL_TOKENS)
+    }
+#endif
   }
 
 }

@@ -1,8 +1,16 @@
 module;
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <expected>
+#include <type_traits>
+#include <utility>
 export module out.core;
+// Dependency contract (DO NOT VIOLATE)
+// Allowed out.* imports: (none)
+// Forbidden out.* imports: out.*
+// Rationale: foundation types only (errc/result/ok/bytes).
+// If you need functionality from a higher layer, add an extension point in this layer instead.
 
 // out.core intentionally contains only the minimal, cross-module primitives.
 // Do NOT turn this into a general utilities header.
@@ -38,6 +46,25 @@ export namespace out {
     constexpr result<std::remove_cvref_t<T>> ok(T&& v) noexcept {
         return result<std::remove_cvref_t<T>>{std::in_place, std::forward<T>(v)};
     }
+
+    // Lazy wrapper for deferred evaluation.
+    template <class F>
+    struct lazy_t { F f; };
+
+    template <class F>
+    constexpr auto lazy(F&& f) { return lazy_t<std::decay_t<F>>{std::forward<F>(f)}; }
+
+    template <class T>
+    constexpr decltype(auto) eval(T&& v) { return std::forward<T>(v); }
+
+    template <class F>
+    constexpr decltype(auto) eval(lazy_t<F>& lz) { return lz.f(); }
+
+    template <class F>
+    constexpr decltype(auto) eval(const lazy_t<F>& lz) { return lz.f(); }
+
+    template <class F>
+    constexpr decltype(auto) eval(lazy_t<F>&& lz) { return lz.f(); }
 
     template <class T>
     constexpr void discard(result<T>&&) noexcept {}
