@@ -2,6 +2,19 @@
 
 import out.api;
 
+// Custom type + formatter extension point.
+struct vec2 {
+    int x = 0;
+    int y = 0;
+};
+template <>
+struct out::formatter<vec2> {
+    template <class S>
+    static out::result<std::size_t> write(S& sink, const vec2& v, out::fmt_spec) noexcept {
+        return out::print<"({}, {})">(sink, v.x, v.y);
+    }
+};
+
 // Custom domain
 struct network_domain {};
 template <> inline constexpr auto out::domain_enabled<network_domain> = true;
@@ -36,10 +49,11 @@ extern "C" void example()
     out::info<"Chars: '{}' '{}'">( console, 'A', 'z' );
     out::info<"String: '{}'">(console, std::string_view{"hello"});
 
-    // TODO: 增加bool类型支持
-    // out::info<"Bool: '{}' and '{}'">(console, true, false);
+    out::info<"Bool: '{}' and '{}'">(console, true, false);
+    out::info<"Bool padded: '{:8}'">(console, true);
 
-    // TODO: 增加自定义类型扩展
+    // Custom formatter extension point.
+    out::info<"Vec2: {}">(console, vec2{3, 4});
 
     out::info<"==========================">(console);
 
@@ -47,18 +61,18 @@ extern "C" void example()
     // Optional features (pitfalls)
     //
     // Binary: {:b}/{:B}
-    //     Requires: -DOUT_ENABLE_BINARY
+        // Binary output requires compile option OUT_ENABLE_BINARY.
     //
     // Float: {:f}/{:e}/{:g} and precision {:.2f}
-    //     Requires: -DOUT_ENABLE_FLOAT
+        // Floating-point output requires compile option OUT_ENABLE_FLOAT.
     //
     // If you forget to enable them, you should get a clear compile-time message.
     // ------------------------------------------------------------
     {
-        // 二进制输出    需编译选项开启对应宏 OUT_ENABLE_BINARY
+        // Binary output requires compile option OUT_ENABLE_BINARY.
         auto vb = 0b11001010;
         out::debug<"Binary demo: value={}, bin={:b}">(console, vb, vb);
-        // 浮点数输出    需编译选项开启对应宏 OUT_ENABLE_FLOAT
+        // Floating-point output requires compile option OUT_ENABLE_FLOAT.
         auto vf = 3.1415926f;
         out::debug<"Float demo: f={:f}">(console, vf);
         out::debug<"Float precision: f={:.2f}">(console, vf);
@@ -92,7 +106,7 @@ extern "C" void example()
 
     out::println<"==========================">(console_ansi);
 
-    // 使用语法糖缩短命名
+    // Shorter names via using namespace out
     {
         using namespace out;
 
@@ -128,9 +142,9 @@ extern "C" void example()
     // Domain filtering
     // ------------------------------------------------------------
     out::buffer_sink<256> cap;
-    // 这里被过滤，不会打印到 cap buffer
+    // Filtered out; nothing is written into cap buffer.
     out::emit<out::level::info, noisy_domain, "[noisy] {}">(cap, "SHOULD NOT APPEAR");
-    out::print<"{}">(console, cap.view());  // 输出为空
+    out::print<"{}">(console, cap.view());  // empty output
 
     out::emit<out::level::info, network_domain,   "[net] {}">(cap, "Connected");
     out::print<"{}">(console, cap.view());
@@ -138,6 +152,11 @@ extern "C" void example()
     out::log<out::level::info, network_domain>(console)
         .domain_prefix()
         .println<"Domain prefix on">();
+
+    // Newline policy per logger instance.
+    out::log<out::level::info>(console)
+        .set_newline(out::newline::lf)
+        .println<"LF newline">();
 
     // ------------------------------------------------------------
     // Sinks: line-buffered + fixed buffer
@@ -154,7 +173,7 @@ extern "C" void example()
     out::port::set_default_console(&console);
     out::info<"Default console redirected.">();
 
-    // TODO: 添加更多错误示例
-    // out::debug<"{}\t{}">(uart, 42); // 参数数量不匹配
-    // out::debug<"{">(uart, 42); // 括号不闭合
+    // TODO: add more error examples
+    // out::debug<"{}\t{}">(uart, 42); // argument count mismatch
+    // out::debug<"{">(uart, 42); // missing closing brace
 }
