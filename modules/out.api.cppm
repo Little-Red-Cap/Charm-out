@@ -2,7 +2,6 @@ module;
 #include <array>
 #include <cstdint>
 #include <expected>
-#include <memory>
 #include <string_view>
 #include <utility>
 export module out.api;
@@ -93,6 +92,7 @@ export namespace out {
         struct sink_ref {
             S* base{};
             result<std::size_t> write(bytes b) noexcept { return base->write(b); }
+            result<std::size_t> write(bytes b) const noexcept { return base->write(b); }
         };
 
         template <class S>
@@ -125,6 +125,11 @@ export namespace out {
     constexpr style_cmd make_style(ansi::bg_t v) noexcept {
         return {style_cmd::kind::bg, {}, ansi::bg_code(v.c)};
     }
+    template <class T>
+    constexpr style_cmd make_style(const T&) noexcept {
+        static_assert(out::dependent_false_v<T>, "unsupported style token");
+        return {};
+    }
 
     template <level L, class Domain, class Sink>
     struct logger {
@@ -140,11 +145,7 @@ export namespace out {
         template <class NewSink>
         constexpr auto with_sink(NewSink ns) const noexcept {
             logger<L, Domain, NewSink> out{std::move(ns)};
-            out.styles = styles;
-            out.style_count = style_count;
-            out.auto_reset_enabled = auto_reset_enabled;
-            out.with_timestamp = with_timestamp;
-            out.nl = nl;
+            copy_opts_to(out);
             return out;
         }
 
@@ -158,11 +159,7 @@ export namespace out {
         template <class NewDomain>
         constexpr auto domain() const noexcept {
             logger<L, NewDomain, Sink> out{sink};
-            out.styles = styles;
-            out.style_count = style_count;
-            out.auto_reset_enabled = auto_reset_enabled;
-            out.with_timestamp = with_timestamp;
-            out.nl = nl;
+            copy_opts_to(out);
             return out;
         }
 
@@ -173,8 +170,8 @@ export namespace out {
         constexpr logger& newline(newline n) noexcept { nl = n; return *this; }
 
         template <class... Tokens>
-        constexpr logger& style(Tokens... tokens) noexcept {
-            (push_style(make_style(tokens)), ...);
+        constexpr logger& style(Tokens&&... tokens) noexcept {
+            (push_style(make_style(std::forward<Tokens>(tokens))), ...);
             return *this;
         }
 
@@ -189,6 +186,15 @@ export namespace out {
         }
 
     private:
+        template <class Other>
+        constexpr void copy_opts_to(Other& out) const noexcept {
+            out.styles = styles;
+            out.style_count = style_count;
+            out.auto_reset_enabled = auto_reset_enabled;
+            out.with_timestamp = with_timestamp;
+            out.nl = nl;
+        }
+
         constexpr void push_style(style_cmd cmd) noexcept {
             if (style_count >= styles.size()) return;
             styles[style_count++] = cmd;
@@ -239,6 +245,14 @@ export namespace out {
                         auto rn = write(sink, nl_sv);
                         if (!rn) return std::unexpected(rn.error());
                         total += *rn;
+
+                        auto* base = detail::base_ptr(sink);
+                        using base_t = std::remove_reference_t<decltype(*base)>;
+                        if constexpr (Flushable<base_t>) {
+                            auto rf = base->flush();
+                            if (!rf) return std::unexpected(rf.error());
+                            total += *rf;
+                        }
                     }
                 }
 
@@ -259,6 +273,16 @@ export namespace out {
     template <level L, class Domain = default_domain, class S>
     inline auto log(S& s) noexcept {
         return logger<L, Domain, detail::sink_ref<S>>{detail::sink_ref<S>{&s}};
+    }
+
+    template <level L, class Domain = default_domain>
+    inline auto logc() noexcept {
+        return log<L, Domain>().ansi<true>();
+    }
+
+    template <level L, class Domain = default_domain, class S>
+    inline auto logc(S& s) noexcept {
+        return log<L, Domain>(s).ansi<true>();
     }
 
 }
