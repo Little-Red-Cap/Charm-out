@@ -38,4 +38,7 @@ export namespace out {
     constexpr result<std::remove_cvref_t<T>> ok(T&& v) noexcept {
         return result<std::remove_cvref_t<T>>{std::in_place, std::forward<T>(v)};
     }
+
+    template <class T>
+    constexpr void discard(result<T>&&) noexcept {}
 }
