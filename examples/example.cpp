@@ -16,6 +16,7 @@ extern "C" void example()
     // Minimal: Hello world
     // ------------------------------------------------------------
     out::println<"Hello world!">(console);
+    out::info<"Default console works too.">();
 
     // ------------------------------------------------------------
     // Format basics: {}, escaping, width/zero-pad, hex
