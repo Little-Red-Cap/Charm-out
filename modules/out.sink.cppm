@@ -33,6 +33,9 @@ export namespace out {
     // 轻量通用适配器（不再单独提供 out.sinks 模块）
 
     // 1) 固定缓冲区：便于单元测试/收集输出
+    // Fixed-size buffer sink.
+    // Intended for testing, logging capture, or diagnostics.
+    // Not suitable as a general-purpose streaming sink.
     template <std::size_t N>
     struct buffer_sink {
         std::array<char, N> buf{};
