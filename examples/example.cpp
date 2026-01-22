@@ -80,6 +80,11 @@ extern "C" void example()
     auto console_plain = out::ansi_with<false>(console);
     out::info<"{}INFO{} ansi off">(console_plain, out::fg(out::color::green), out::reset);
 
+    // Logger chain: styles are outside format args.
+    out::log<out::level::info>(console_ansi)
+        .style(out::fg(out::color::green), out::bold)
+        .println<"Status: {}">("OK");
+
     out::println<"==========================">(console_ansi);
 
     // 使用语法糖缩短命名
