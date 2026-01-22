@@ -136,6 +136,10 @@ extern "C" void example()
     out::println<"More: {}">(buf, "OK");
     out::println<"{}">(console, buf.view());
 
+    // Default console override (useful for tests or redirection)
+    out::port::set_default_console(&console);
+    out::info<"Default console redirected.">();
+
     // TODO: 添加更多错误示例
     // out::debug<"{}\t{}">(uart, 42); // 参数数量不匹配
     // out::debug<"{">(uart, 42); // 括号不闭合
