@@ -171,6 +171,58 @@ extern "C" void example()
     out::print<"More: {}\r\n">(buf, "OK");
     out::print<"{}\r\n">(console, buf.view());
 
+#if 0
+    // ------------------------------------------------------------
+    // Dev sink experiments: write/ansi/flush metrics
+    // ------------------------------------------------------------
+    out::dev_sink<1024> dev;
+    auto dump_metrics = [&](std::string_view name) {
+        const auto total_calls = dev.write_calls_total();
+        const auto avg = total_calls ? (dev.bytes_total / total_calls) : 0u;
+        out::info<"[dev] {} bytes_calls={} ansi_calls={} total_bytes={} flush_calls={} total_calls={} avg={}">(
+            console, name, dev.bytes_calls, dev.ansi_calls, dev.bytes_total, dev.flush_calls, total_calls, avg);
+    };
+
+    // Case A: token unroll threshold (compile twice with/without OUT_UNROLL_TOKENS).
+    dev.reset();
+    out::raw(dev).println<"A{}B{}C{}D{}E{}F{}G{}H{}I{}J{}">(1,2,3,4,5,6,7,8,9,10);
+    dump_metrics("A1 tokens<=max");
+    dev.reset();
+    out::raw(dev).println<
+        "A{}B{}C{}D{}E{}F{}G{}H{}I{}J{}K{}L{}M{}N{}O{}P{}Q{}R{}S{}T{}U{}V{}W{}X{}Y{}Z{}a{}b{}c{}d{}e{}f{}g{}h{}i{}j{}k{}l{}m{}n{}"
+    >(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40);
+    dump_metrics("A2 tokens>max");
+
+    // Case B: raw vs log flush policy.
+    dev.reset();
+    out::raw(dev).println<"Hello {}">(123);
+    dump_metrics("B1 raw");
+    dev.reset();
+    out::log<out::level::info>(dev).println<"Hello {}">(123);
+    dump_metrics("B2 log");
+    dev.reset();
+    out::log<out::level::info>(dev).no_flush().println<"Hello {}">(123);
+    dump_metrics("B3 log no_flush");
+
+    // Case C: ANSI path (style vs format tokens).
+    dev.reset();
+    out::logc<out::level::info>(dev)
+        .style(out::fg(out::color::red), out::bold)
+        .println<"X{}">(1);
+    dump_metrics("C1 style");
+    dev.reset();
+    out::logc<out::level::info>(dev).println<"{}X{}">(out::fg(out::color::red), out::reset);
+    dump_metrics("C2 format");
+
+    // Case D: padding impact on write calls.
+    dev.reset();
+    out::raw(dev).println<"'{:08X}'">(0x12AB);
+    dump_metrics("D1 padded");
+    dev.reset();
+    out::raw(dev).println<"'{}'">(0x12AB);
+    dump_metrics("D2 plain");
+#endif
+
     // Default console override (useful for tests or redirection)
     out::port::set_default_console(&console);
     out::info<"Default console redirected.">();
