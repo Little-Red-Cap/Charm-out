@@ -100,26 +100,38 @@ export namespace out::ansi {
         }
     } // namespace detail
 
+    // Public helpers for ANSI-aware emitters.
+    template <class S>
+    concept AnsiSink = detail::AnsiSink<S>;
+
+    constexpr int fg_code(color c) noexcept { return detail::fg_code(c); }
+    constexpr int bg_code(color c) noexcept { return detail::bg_code(c); }
+
+    template <AnsiSink S>
+    inline result<std::size_t> write_ansi_code(S& s, int code) noexcept {
+        return detail::write_code(s, code);
+    }
+
     // write_one 仅对具备 write_ansi 的 sink 生效
-    template <detail::AnsiSink S>
+    template <AnsiSink S>
     inline result<std::size_t> write_one(S& s, reset_t, fmt_spec) noexcept { return s.write_ansi("\x1b[0m"); }
 
-    template <detail::AnsiSink S>
+    template <AnsiSink S>
     inline result<std::size_t> write_one(S& s, bold_t, fmt_spec) noexcept { return s.write_ansi("\x1b[1m"); }
 
-    template <detail::AnsiSink S>
+    template <AnsiSink S>
     inline result<std::size_t> write_one(S& s, dim_t, fmt_spec) noexcept { return s.write_ansi("\x1b[2m"); }
 
-    template <detail::AnsiSink S>
+    template <AnsiSink S>
     inline result<std::size_t> write_one(S& s, italic_t, fmt_spec) noexcept { return s.write_ansi("\x1b[3m"); }
 
-    template <detail::AnsiSink S>
+    template <AnsiSink S>
     inline result<std::size_t> write_one(S& s, underline_t, fmt_spec) noexcept { return s.write_ansi("\x1b[4m"); }
 
-    template <detail::AnsiSink S>
+    template <AnsiSink S>
     inline result<std::size_t> write_one(S& s, fg_t v, fmt_spec) noexcept { return detail::write_code(s, detail::fg_code(v.c)); }
 
-    template <detail::AnsiSink S>
+    template <AnsiSink S>
     inline result<std::size_t> write_one(S& s, bg_t v, fmt_spec) noexcept { return detail::write_code(s, detail::bg_code(v.c)); }
 } // namespace out::ansi
 
@@ -128,31 +140,31 @@ export namespace out::ansi {
 // and creating a module dependency cycle.
 export namespace out {
     template <class S>
-    requires (!ansi::detail::AnsiSink<S>)
+    requires (!ansi::AnsiSink<S>)
     inline result<std::size_t> write_one(S&, reset_t, fmt_spec) noexcept { return ok<std::size_t>(0u); }
 
     template <class S>
-    requires (!ansi::detail::AnsiSink<S>)
+    requires (!ansi::AnsiSink<S>)
     inline result<std::size_t> write_one(S&, bold_t, fmt_spec) noexcept { return ok<std::size_t>(0u); }
 
     template <class S>
-    requires (!ansi::detail::AnsiSink<S>)
+    requires (!ansi::AnsiSink<S>)
     inline result<std::size_t> write_one(S&, dim_t, fmt_spec) noexcept { return ok<std::size_t>(0u); }
 
     template <class S>
-    requires (!ansi::detail::AnsiSink<S>)
+    requires (!ansi::AnsiSink<S>)
     inline result<std::size_t> write_one(S&, italic_t, fmt_spec) noexcept { return ok<std::size_t>(0u); }
 
     template <class S>
-    requires (!ansi::detail::AnsiSink<S>)
+    requires (!ansi::AnsiSink<S>)
     inline result<std::size_t> write_one(S&, underline_t, fmt_spec) noexcept { return ok<std::size_t>(0u); }
 
     template <class S>
-    requires (!ansi::detail::AnsiSink<S>)
+    requires (!ansi::AnsiSink<S>)
     inline result<std::size_t> write_one(S&, ansi::fg_t, fmt_spec) noexcept { return ok<std::size_t>(0u); }
 
     template <class S>
-    requires (!ansi::detail::AnsiSink<S>)
+    requires (!ansi::AnsiSink<S>)
     inline result<std::size_t> write_one(S&, ansi::bg_t, fmt_spec) noexcept { return ok<std::size_t>(0u); }
 }
 
