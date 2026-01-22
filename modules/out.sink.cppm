@@ -58,12 +58,64 @@ export namespace out {
         void clear() noexcept { pos = 0; }
     };
 
-    // 2) Null sink: silent output for baselines.
+    // 2) Dev sink: capture output + metrics for tests/diagnostics.
+    // Intended for testing and profiling write behavior; not for production streaming.
+    template <std::size_t N>
+    struct dev_sink {
+        std::array<char, N> buf{};
+        std::size_t pos = 0;
+        std::size_t write_calls = 0;
+        std::size_t ansi_calls = 0;
+        std::size_t flush_calls = 0;
+        std::size_t bytes_total = 0;
+        errc last_err = errc::ok;
+
+        result<std::size_t> write(bytes b) noexcept {
+            ++write_calls;
+            return write_bytes(b);
+        }
+
+        result<std::size_t> write_ansi(std::string_view sv) noexcept {
+            ++ansi_calls;
+            ++write_calls;
+            auto b = bytes{reinterpret_cast<const std::byte*>(sv.data()), sv.size()};
+            return write_bytes(b);
+        }
+
+        result<std::size_t> flush() noexcept {
+            ++flush_calls;
+            return ok<std::size_t>(0u);
+        }
+
+        std::string_view view() const noexcept { return {buf.data(), pos}; }
+        void clear() noexcept { pos = 0; }
+        void reset_metrics() noexcept {
+            write_calls = 0;
+            ansi_calls = 0;
+            flush_calls = 0;
+            bytes_total = 0;
+            last_err = errc::ok;
+        }
+
+      private:
+        result<std::size_t> write_bytes(bytes b) noexcept {
+            if (pos + b.size() > N) {
+                last_err = errc::buffer_overflow;
+                return std::unexpected(errc::buffer_overflow);
+            }
+            std::memcpy(buf.data() + pos, b.data(), b.size());
+            pos += b.size();
+            bytes_total += b.size();
+            return ok(b.size());
+        }
+    };
+
+    // 3) Null sink: silent output for baselines.
     struct null_sink {
         result<std::size_t> write(bytes b) noexcept { return ok(b.size()); }
     };
 
-    // 3) Line buffer: flushes on newline (useful for UART/slow devices).
+    // 4) Line buffer: flushes on newline (useful for UART/slow devices).
     template <Sink BaseSink, std::size_t BufSize = 128>
     struct line_buffered_sink {
         BaseSink& base;
