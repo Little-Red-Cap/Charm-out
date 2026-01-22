@@ -138,6 +138,8 @@ export namespace out {
         std::uint8_t style_count = 0;
         bool auto_reset_enabled = true;
         bool with_timestamp = false;
+        bool with_level = true;
+        bool with_domain = false;
         newline nl = newline::crlf;
 
         explicit constexpr logger(Sink s) noexcept : sink(std::move(s)) {}
@@ -167,6 +169,8 @@ export namespace out {
         constexpr logger& no_reset() noexcept { auto_reset_enabled = false; return *this; }
         constexpr logger& reset_on() noexcept { auto_reset_enabled = true; return *this; }
         constexpr logger& timestamp() noexcept { with_timestamp = true; return *this; }
+        constexpr logger& level_prefix(bool on = true) noexcept { with_level = on; return *this; }
+        constexpr logger& domain_prefix(bool on = true) noexcept { with_domain = on; return *this; }
         constexpr logger& newline(newline n) noexcept { nl = n; return *this; }
 
         template <class... Tokens>
@@ -192,7 +196,18 @@ export namespace out {
             out.style_count = style_count;
             out.auto_reset_enabled = auto_reset_enabled;
             out.with_timestamp = with_timestamp;
+            out.with_level = with_level;
+            out.with_domain = with_domain;
             out.nl = nl;
+        }
+
+        static constexpr char level_tag() noexcept {
+            if constexpr (L == level::error) return 'E';
+            else if constexpr (L == level::warn) return 'W';
+            else if constexpr (L == level::info) return 'I';
+            else if constexpr (L == level::debug) return 'D';
+            else if constexpr (L == level::trace) return 'T';
+            else return ' ';
         }
 
         constexpr void push_style(style_cmd cmd) noexcept {
@@ -221,6 +236,27 @@ export namespace out {
                     auto rts = out::print<"[{}] ">(sink, port::now_ms());
                     if (!rts) return std::unexpected(rts.error());
                     total += *rts;
+                }
+
+                if (with_level) {
+                    char buf[4] = {'[', level_tag(), ']', ' '};
+                    auto rp = write(sink, std::string_view{buf, sizeof(buf)});
+                    if (!rp) return std::unexpected(rp.error());
+                    total += *rp;
+                }
+
+                if (with_domain) {
+                    if constexpr (domain_name<Domain>.size() != 0) {
+                        auto r1 = write(sink, "[");
+                        if (!r1) return std::unexpected(r1.error());
+                        total += *r1;
+                        auto r2 = write(sink, domain_name<Domain>);
+                        if (!r2) return std::unexpected(r2.error());
+                        total += *r2;
+                        auto r3 = write(sink, "] ");
+                        if (!r3) return std::unexpected(r3.error());
+                        total += *r3;
+                    }
                 }
 
                 for (std::uint8_t i = 0; i < style_count; ++i) {
@@ -277,12 +313,12 @@ export namespace out {
 
     template <level L, class Domain = default_domain>
     inline auto logc() noexcept {
-        return log<L, Domain>().ansi<true>();
+        return log<L, Domain>().template ansi<true>();
     }
 
     template <level L, class Domain = default_domain, class S>
     inline auto logc(S& s) noexcept {
-        return log<L, Domain>(s).ansi<true>();
+        return log<L, Domain>(s).template ansi<true>();
     }
 
 }
