@@ -170,7 +170,7 @@ export namespace out {
         constexpr logger& timestamp() noexcept { with_timestamp = true; return *this; }
         constexpr logger& level_prefix(bool on = true) noexcept { with_level = on; return *this; }
         constexpr logger& domain_prefix(bool on = true) noexcept { with_domain = on; return *this; }
-        constexpr logger& newline(newline n) noexcept { nl = n; return *this; }
+        constexpr logger& set_newline(newline n) noexcept { nl = n; return *this; }
 
         template <class... Tokens>
         constexpr logger& style(Tokens&&... tokens) noexcept {
