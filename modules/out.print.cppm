@@ -20,9 +20,9 @@ export namespace out {
 
     template <fixed_string Fmt, Sink S, class... Args>
     inline result<std::size_t> println(S& sink, Args&&... args) noexcept {
-        auto r = vprint<Fmt>(sink, std::forward<Args>(args)...);
+        auto r = print<Fmt>(sink, std::forward<Args>(args)...);
         if (!r) return r;
-        // TODO: \r\n 换行策略做成可配置
+        // Note: newline policy is handled by logger, not by print/println.
         auto rn = write(sink, "\r\n");
         if (!rn) return std::unexpected(rn.error());
         return *r + *rn;
