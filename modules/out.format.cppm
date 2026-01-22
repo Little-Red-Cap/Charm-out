@@ -534,6 +534,28 @@ namespace detail {
       return write(sink, std::string_view{&c, 1});
     } else if constexpr (std::is_convertible_v<T, std::string_view>) {
       return write(sink, std::string_view(value));
+    } else if constexpr (std::is_same_v<T, bool>) {
+      const std::string_view sv = value ? std::string_view{"true"} : std::string_view{"false"};
+      std::size_t total = 0;
+
+      if (spec.width > sv.size()) {
+        std::size_t pad = spec.width - sv.size();
+        const char ch = spec.zero_pad ? '0' : ' ';
+        char pad_buf[pad_chunk_size];
+        for (auto& c : pad_buf) c = ch;
+        while (pad != 0) {
+          const std::size_t n = (pad > sizeof(pad_buf)) ? sizeof(pad_buf) : pad;
+          auto r = write(sink, std::string_view{pad_buf, n});
+          if (!r) return std::unexpected(r.error());
+          total += *r;
+          pad -= n;
+        }
+      }
+
+      auto r = write(sink, sv);
+      if (!r) return std::unexpected(r.error());
+      total += *r;
+      return ok(total);
     } else if constexpr (std::is_floating_point_v<T>) {
 #ifdef OUT_ENABLE_FLOAT
       // return write_float(sink, value, spec);
