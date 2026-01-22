@@ -5,6 +5,7 @@ import out.api;
 // Custom domain
 struct network_domain {};
 template <> inline constexpr auto out::domain_enabled<network_domain> = true;
+template <> inline constexpr std::string_view out::domain_name<network_domain> = "net";
 struct noisy_domain {};
 template <> inline constexpr auto out::domain_enabled<noisy_domain> = false;
 
@@ -84,6 +85,10 @@ extern "C" void example()
     out::log<out::level::info>(console_ansi)
         .style(out::fg(out::color::green), out::bold)
         .println<"Status: {}">("OK");
+    // Logger sugar: default ANSI + level prefix.
+    out::logc<out::level::warn>(console)
+        .level_prefix()
+        .println<"Colored warning">();
 
     out::println<"==========================">(console_ansi);
 
@@ -129,6 +134,10 @@ extern "C" void example()
 
     out::emit<out::level::info, network_domain,   "[net] {}">(cap, "Connected");
     out::print<"{}">(console, cap.view());
+    // Domain name (opt-in prefix)
+    out::log<out::level::info, network_domain>(console)
+        .domain_prefix()
+        .println<"Domain prefix on">();
 
     // ------------------------------------------------------------
     // Sinks: line-buffered + fixed buffer
